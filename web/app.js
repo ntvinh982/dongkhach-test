@@ -75,7 +75,7 @@ function planLeft(){const s=shopRow(); if(!s) return null; const t=s.status==='t
 function planBanner(){
   const s=shopRow(); const left=planLeft(); if(!s||left===null) return '';
   const contact=CFG.supportContact?' Liên hệ: '+esc(CFG.supportContact)+'.':'';
-  if(left<=0) return `<div class="banner warn"><span>${s.status==='trial'?'Đã hết hạn dùng thử':'Gói đã hết hạn'}. Anh vẫn xem được dữ liệu nhưng chưa thêm/sửa được.${contact}</span></div>`;
+  if(left<=0) return `<div class="banner warn"><span>${s.status==='trial'?'Đã hết hạn dùng thử':'Gói đã hết hạn'}. Bạn vẫn xem được dữ liệu nhưng chưa thêm/sửa được.${contact}</span></div>`;
   const days=Math.ceil(left/864e5);
   if(isAdmin()&&(s.status==='trial'||days<=7)) return `<div class="banner"><span>${s.status==='trial'?'Đang dùng thử':'Gói trả phí'} · còn ${days} ngày.${contact}</span></div>`;
   return '';
@@ -269,15 +269,15 @@ function fail(e){
   else if(c==='forbidden'||(c==='42501'&&/row-level security|permission denied/i.test(m))) toast(NOPERM);
   else if(c==='42501') toast(m);                       // thông báo tiếng Việt từ trigger trong DB
   else if(c==='same_password') toast('Mật khẩu mới phải khác mật khẩu cũ.');
-  else if(/Failed to fetch|NetworkError|network|Load failed/i.test(m)) toast('Mất kết nối mạng, anh thử lại nhé.');
-  else if(c==='PGRST301'||c==='PGRST303'||e&&e.status===401||/JWT|token.*expired|not authenticated/i.test(m)) toast('Phiên đăng nhập đã hết hạn. Anh tải lại trang (F5) rồi đăng nhập lại nhé.');
-  else toast('Chưa lưu được'+(c||m?' ('+[c,m.slice(0,90)].filter(Boolean).join(': ')+')':'')+'. Anh thử lại nhé.');   // kèm mã lỗi để dễ tìm nguyên nhân
+  else if(/Failed to fetch|NetworkError|network|Load failed/i.test(m)) toast('Mất kết nối mạng, bạn thử lại nhé.');
+  else if(c==='PGRST301'||c==='PGRST303'||e&&e.status===401||/JWT|token.*expired|not authenticated/i.test(m)) toast('Phiên đăng nhập đã hết hạn. Bạn tải lại trang (F5) rồi đăng nhập lại nhé.');
+  else toast('Chưa lưu được'+(c||m?' ('+[c,m.slice(0,90)].filter(Boolean).join(': ')+')':'')+'. Bạn thử lại nhé.');   // kèm mã lỗi để dễ tìm nguyên nhân
   console.error(e);
 }
 async function fnCall(name,body){
   const {data,error}=await sb.functions.invoke(name,{body});
   if(error){
-    let m='Chưa lưu được, anh thử lại nhé.';
+    let m='Chưa lưu được, bạn thử lại nhé.';
     try{ if(error.context&&error.context.json){const j=await error.context.json(); if(j&&j.error) m=j.error} }catch(_){}
     throw {code:'app',message:m};
   }
@@ -355,7 +355,7 @@ function afterData(){
     else if(S.loaded.staff){ leave(S.me?'Tài khoản đã bị khoá hoặc xoá.':'Tài khoản này đã bị khoá hoặc chưa được cấp quyền.'); return }
   }
   // Quán bị đình chỉ: máy chủ không trả dòng quán nào về
-  if(S.authId&&S.loaded.staff&&S.loaded.shops&&!S.shops.length){ leave('Quán này đang tạm khoá. Anh liên hệ nhà cung cấp để mở lại nhé.'); return }
+  if(S.authId&&S.loaded.staff&&S.loaded.shops&&!S.shops.length){ leave('Quán này đang tạm khoá. Bạn liên hệ nhà cung cấp để mở lại nhé.'); return }
   if(S.shopTitle!==brandName()){S.shopTitle=brandName(); document.title=(brandName()?brandName()+' · ':'')+'Đông Khách'}
   autoDay();
   render();
@@ -444,7 +444,7 @@ function viewAuth(mode){
   if(mode==='signup') return `<div class="auth">${logoOf(code,true)}<h1>Tạo quán mới</h1>
     <form id="signupForm">
       <div class="field"><label for="s_shop">Tên quán</label><input type="text" id="s_shop" maxlength="100" autocomplete="organization"></div>
-      <div class="field"><label for="s_user">Tên đăng nhập của anh/chị (quản lý)</label><input type="text" id="s_user" autocapitalize="off" autocomplete="username"><span class="hint">Không dấu, không cách, ít nhất 3 ký tự. Ví dụ: chu, admin.</span></div>
+      <div class="field"><label for="s_user">Tên đăng nhập của bạn (quản lý)</label><input type="text" id="s_user" autocapitalize="off" autocomplete="username"><span class="hint">Không dấu, không cách, ít nhất 3 ký tự. Ví dụ: chu, admin.</span></div>
       <div class="field"><label for="s_pw">Mật khẩu</label><input type="password" id="s_pw" autocomplete="new-password"><span class="hint">Ít nhất 6 ký tự, không dùng mật khẩu dễ đoán.</span></div>
       <div class="field"><label for="s_phone">Số điện thoại liên hệ</label><input type="tel" id="s_phone" maxlength="40" autocomplete="tel"></div>
       <input type="text" id="s_site" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
@@ -702,7 +702,7 @@ function viewSettings(){
     +(can('shop.edit')?row('brand-form','palette','Logo và màu giao diện',esc(accentName(brandNow().accent))+(brandNow().logo?' · đã có logo':' · chưa có logo')):'')
     +(can('shop.edit')?row('shop-form','print','Thông tin cửa hàng',esc(shop().name)+' · đơn sau '+esc(shop().cutoff)+' tính ngày mai'):'');
   if(shopRows) h+=`<div class="sectionlabel">Cửa hàng</div><div class="rows">${shopRows}</div>`;
-  h+=`<div class="sectionlabel">Tài khoản của anh</div><div class="rows">
+  h+=`<div class="sectionlabel">Tài khoản của bạn</div><div class="rows">
     ${row('change-pw','key','Đổi mật khẩu',`Đăng nhập bằng: ${esc(S.me.username)} · mã quán ${esc(shopSlug())}`)}
     ${row('logout','logout','Đăng xuất','Thoát khỏi app trên máy này')}
   </div>
@@ -747,7 +747,7 @@ function viewStaff(){
   const list=[...S.staff].sort((a,b)=>(a.active===false)-(b.active===false)||(rank[roleOf(a)]??9)-(rank[roleOf(b)]??9)||byName(a,b));
   return `<div class="pagehead"><button class="back" data-act="sub-back">‹ Cài đặt</button><h2>Nhân viên</h2><button class="btn primary" data-act="new-staff">+ Thêm</button></div>
   <div class="hint" style="margin:0 2px 10px;display:flex;flex-direction:column;gap:2px"><span><b>Quản lý:</b> ${tw(ROLE_HINT.admin)}</span><span><b>Thu ngân:</b> ${tw(ROLE_HINT.cashier)}</span><span><b>Shipper:</b> ${tw(ROLE_HINT.shipper)}</span><span>Bấm vào từng người để chỉnh quyền chi tiết.</span></div>
-  <div class="rows">${list.map(s=>`<button class="rowi" data-act="edit-staff" data-id="${s.id}"><div class="main"><b>${esc(s.name)}${s.id===S.me.id?' (anh)':''}</b><span>${esc(s.username)}${roleOf(s)!=='admin'&&s.perms&&Object.keys(s.perms).length?' · quyền tuỳ chỉnh':''}</span></div>
+  <div class="rows">${list.map(s=>`<button class="rowi" data-act="edit-staff" data-id="${s.id}"><div class="main"><b>${esc(s.name)}${s.id===S.me.id?' (bạn)':''}</b><span>${esc(s.username)}${roleOf(s)!=='admin'&&s.perms&&Object.keys(s.perms).length?' · quyền tuỳ chỉnh':''}</span></div>
     ${s.active===false?'<span class="role lock">Đã khoá</span>':`<span class="role ${roleOf(s)==='admin'?'':'staff'}">${ROLE[roleOf(s)]||''}</span>`}${icon('chev','ic chev')}</button>`).join('')}</div>`;
 }
 
@@ -1140,27 +1140,26 @@ function menuForm(m,presetGid){
   const cv=can('cost.view'), c=m&&cv?costOf(m.id):null, units=UNITS[bizType()];
   openSheet(`${head(m?`Sửa ${W.m}`:`Thêm ${W.m}`)}
   <div class="sh-body"><section class="fs">
-    <div class="field"><label for="m_name">Tên ${W.m}</label><input type="text" id="m_name" value="${esc(m?m.name:'')}" placeholder="${isRetail()?'VD: Son kem lì 03':'VD: Cơm Gà Mắm Tỏi'}"></div>
+    <div class="namesell"><div class="field"><label for="m_name">Tên ${W.m}</label><input type="text" id="m_name" value="${esc(m?m.name:'')}" placeholder="${isRetail()?'VD: Son kem lì 03':'VD: Cơm Gà Mắm Tỏi'}"></div>
+      <label class="check sell" title="Bỏ tick = ẩn, không hiện khi tạo đơn"><input type="checkbox" id="m_active" ${!m||m.active!==false?'checked':''}> Đang bán</label></div>
     <div class="field"><label for="m_group">Nhóm ${W.m}</label><select id="m_group"><option value="" ${gid?'':'selected'}>Chưa xếp nhóm</option>${opts}</select></div>
     <div class="grid2">
-      <div class="field"><label for="m_price">Giá bán (đồng)</label><input inputmode="numeric" id="m_price" value="${m?m.price:''}" placeholder="VD: 45000"><span class="hint" id="m_prev"></span></div>
-      ${cv?`<div class="field"><label for="m_cost">Giá vốn (đồng)</label><input inputmode="numeric" id="m_cost" autocomplete="off" value="${c!=null?c:''}" placeholder="Chưa có"><span class="hint" id="m_margin"></span></div>`:''}
+      <div class="field"><label for="m_price">Giá bán (VNĐ)</label><input inputmode="numeric" id="m_price" autocomplete="off" value="${m?fmtN(m.price):''}" placeholder="VD: 45.000"></div>
+      ${cv?`<div class="field"><label for="m_cost">Giá vốn (VNĐ)</label><input inputmode="numeric" id="m_cost" autocomplete="off" value="${c!=null?fmtN(c):''}" placeholder="Chưa có"><span class="hint" id="m_margin"></span></div>`:''}
     </div>
     <div class="field"><label for="m_unit">Đơn vị tính</label><input type="text" id="m_unit" value="${esc(m?m.unit||'':units[0])}" placeholder="${units.slice(0,3).join(', ')}…">
       <div class="unitchips">${units.map(u=>`<button type="button" class="chip" data-act="unit-pick" data-v="${esc(u)}">${esc(u)}</button>`).join('')}</div></div>
-    <label class="check"><input type="checkbox" id="m_active" ${!m||m.active!==false?'checked':''}> Đang bán</label><span class="hint" style="margin-top:-6px">Bỏ tick = ẩn, không hiện khi tạo đơn (bật lại lúc nào cũng được).</span>
     ${cv?`<span class="hint">Giá vốn chỉ người có quyền “Xem và sửa giá vốn” mới thấy. Đơn đã bán giữ giá vốn lúc bán, đổi ở đây chỉ áp dụng cho đơn mới.</span>`:''}
   </section>
   ${m&&can('menu.delete')?`<div><button class="btn danger" data-act="del" data-col="menu" data-id="${m.id}">Xoá ${W.m}</button></div><p class="hint">Xoá ${W.m} không ảnh hưởng các đơn cũ đã ghi. Muốn tạm ngừng bán thì bỏ tick “Đang bán” thay vì xoá.</p>`:''}
   </div>
   <div class="sh-foot"><span></span><button class="btn primary" data-act="save-menu" data-id="${m?m.id:''}">Lưu ${W.m}</button></div>`);
   const pv=()=>{
-    const p=+digits($('#m_price').value); $('#m_prev').textContent=p?'= '+vnd(p):'';
     const mg=$('#m_margin'); if(!mg) return;
-    const cs=$('#m_cost').value.trim(), cn=+digits(cs);
-    mg.textContent=cs&&p?marginTxt(p,cn):cs?'= '+vnd(cn):''; mg.classList.toggle('loss',!!(cs&&p&&cn>p));
+    const p=+digits($('#m_price').value), cs=$('#m_cost').value.trim(), cn=+digits(cs);
+    mg.textContent=cs&&p?marginTxt(p,cn):''; mg.classList.toggle('loss',!!(cs&&p&&cn>p));
   };pv();
-  $('#m_price').addEventListener('input',pv); if($('#m_cost')) $('#m_cost').addEventListener('input',pv);
+  for(const id of ['#m_price','#m_cost']){const el=$(id); if(el) el.addEventListener('input',()=>{moneyInput(el);pv()})}
   if(!m) setTimeout(()=>$('#m_name').focus(),50);
 }
 async function saveMenu(btn){
@@ -1554,6 +1553,15 @@ function defaultOrderDate(){
   return hm>=(shop().cutoff||'17:00')?tomorrowStr():today;          // tối (từ giờ chốt) → ngày mai
 }
 const fmtN=n=>Math.round(n||0).toLocaleString('vi-VN');
+// Ô nhập tiền: tự thêm dấu chấm phần ngàn khi gõ (50000 → 50.000), giữ con trỏ đúng chỗ. Đọc lại bằng +digits(value).
+function moneyInput(el){
+  const pos=el.selectionStart==null?el.value.length:el.selectionStart, before=digits(el.value.slice(0,pos)).length;
+  const raw=digits(el.value).replace(/^0+(?=\d)/,'').slice(0,13), f=raw?raw.replace(/\B(?=(\d{3})+(?!\d))/g,'.'):'';
+  if(el.value===f) return;
+  el.value=f;
+  let i=0,c=0; while(i<f.length&&c<before){ if(f[i]!=='.') c++; i++ }
+  try{ if(document.activeElement===el) el.setSelectionRange(i,i) }catch(_){}
+}
 const BILL_CSS=`@page{margin:0}
 *{box-sizing:border-box}
 html,body{margin:0;background:#fff;color:#000}
@@ -1622,7 +1630,7 @@ function printSheet(list){
   printList=[...list].sort((a,b)=>k(a)<k(b)?-1:k(a)>k(b)?1:(a.createdAt||0)-(b.createdAt||0));
   openSheet(`${head(printList.length>1?'In '+printList.length+' bill':'In bill',printList.length>1?'Mỗi đơn một tờ, xếp theo giờ giao':esc(printList[0].name||'Khách lẻ'))}
   <div class="sh-body">
-    <div class="billprev"><iframe id="billFrame" title="Xem trước bill" sandbox="allow-same-origin"></iframe></div>
+    <div class="billprev"><iframe id="billFrame" title="Xem trước bill" sandbox="allow-same-origin allow-modals"></iframe></div>
     <p class="hint">Bấm “In ngay” rồi chọn máy XP-360B (Margins: None, Scale: 100%). Trên điện thoại, bấm “Tải file” rồi mở file để in. In nhiều bill thì máy in nối tiếp, cuối mỗi bill chừa một khoảng ngắn để xé.</p>
   </div>
   <div class="sh-foot"><span class="hint">Giấy 80mm</span><div class="footbtns"><button class="btn" data-act="save-bill">Tải file</button><button class="btn primary" data-act="print-now">In ngay</button></div></div>`);
@@ -1777,7 +1785,7 @@ document.addEventListener('submit',async e=>{
     b.disabled=true;
     try{
       const r=await fnCall('shop-signup',{shopName:name,username:u,password:pw,phone,site:$('#s_site').value});
-      toast('Đã tạo quán. Mã quán của anh: '+r.slug);
+      toast('Đã tạo quán. Mã quán của bạn: '+r.slug);
       await enter(r.slug,u,pw,err,b);
     }catch(x){ err.textContent=(x&&x.code==='app')?x.message:'Chưa kết nối được máy chủ, thử lại nhé.'; console.error(x); b.disabled=false }
     return;

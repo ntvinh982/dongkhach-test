@@ -456,3 +456,7 @@ input[type=time]::-webkit-date-and-time-value,input[type=date]::-webkit-date-and
 .unitchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .unitchips .chip{padding:3px 10px;font-size:.82rem}
 .hint.loss{color:var(--due)}
+/* Form món: "Đang bán" nằm cạnh ô tên (v7) */
+.namesell{display:flex;gap:12px;align-items:flex-end}
+.namesell .field{flex:1;min-width:0}
+.namesell .sell{flex:none;white-space:nowrap;min-height:44px;padding:0 2px}
