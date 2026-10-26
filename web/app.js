@@ -17,7 +17,7 @@ const noCol=o=>!!(o.noCollect||o.payment==='free');
 const payLabel=o=>payOf(o)==='unpaid'&&noCol(o)?'Chưa thu · trả sau':PAY[payOf(o)];
 const payCls=o=>payOf(o)==='unpaid'&&noCol(o)?'later':payOf(o);
 const ROLE={admin:'Quản lý',cashier:'Thu ngân',shipper:'Shipper'};
-const ROLE_HINT={admin:'Toàn quyền: báo cáo, nhân viên và phân quyền, thông tin cửa hàng, xoá dữ liệu.',cashier:'Mặc định: tạo/sửa đơn, thu tiền, in bill, gán shipper, quản lý khách và món (không xoá, không xem báo cáo). Có thể chỉnh lại bên dưới.',shipper:'Mặc định: chỉ xem các đơn giao trong ngày được gán cho tài khoản này. Có thể cấp thêm quyền bên dưới.'};
+const ROLE_HINT={admin:'Toàn quyền: báo cáo, nhân viên và phân quyền, thông tin cửa hàng, xoá dữ liệu.',cashier:'Mặc định: tạo/sửa đơn, thu tiền, in bill, gán shipper, quản lý khách và món (không xoá, không xem báo cáo). Có thể chỉnh lại bên dưới.',shipper:'Mặc định: chỉ xem các đơn giao được gán cho tài khoản này trong 5 ngày (3 ngày trước, hôm nay, ngày mai), thu tiền và đánh dấu đã giao chỉ ở đơn hôm nay. Có thể cấp thêm quyền bên dưới.'};
 const roleOf=s=>!s?'':(s.role==='staff'?'cashier':s.role); // tài khoản cũ "Nhân viên" = Thu ngân
 const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/g,'d');
 const digits=s=>String(s||'').replace(/\D/g,'');
@@ -68,7 +68,7 @@ function planBanner(){
    Lưu ý: đây là chặn ở giao diện app, không phải khoá bảo mật phía máy chủ. */
 const PERM_GROUPS=[
   ['Đơn hàng',[
-    ['order.all','Xem tất cả đơn','Tắt = chỉ thấy đơn giao trong ngày được gán cho mình'],
+    ['order.all','Xem tất cả đơn','Tắt = chỉ thấy đơn giao được gán cho mình trong 5 ngày (3 ngày trước → ngày mai). Vai trò Shipper không thể bật quyền này'],
     ['order.create','Tạo đơn mới',''],
     ['order.edit','Sửa đơn','Mở và sửa nội dung đơn đã ghi'],
     ['order.pay','Thu tiền và xác nhận đã giao','Nút Tiền mặt, Chuyển khoản, Đã giao'],
@@ -90,26 +90,34 @@ const PERM_GROUPS=[
 const ROLE_PERMS={admin:null,cashier:['order.all','order.create','order.edit','order.pay','order.print','order.assign','cust.view','cust.edit','menu.edit'],shipper:[]};
 const PERM_DEP={'order.assign':'order.all','order.delete':'order.edit','cust.edit':'cust.view','cust.delete':'cust.edit','menu.delete':'menu.edit'};
 const ALL_PERMS=PERM_GROUPS.flatMap(g=>g[1].map(p=>p[0]));
+// Shipper KHÔNG BAO GIỜ được xem đơn của người khác: 3 quyền này bị khoá cứng cho vai trò shipper (cả ở máy chủ lẫn ở đây).
+const SHIP_DENY=['order.all','report.view','order.assign','cust.view','cust.edit','cust.delete','cust.import','order.create'];
+const permLocked=(r,k)=>r==='shipper'&&SHIP_DENY.includes(k);
 const roleDefault=r=>{const l=ROLE_PERMS[r]||[],m={};ALL_PERMS.forEach(k=>m[k]=l.includes(k));return m};
 function permsOf(st){
   const r=roleOf(st), m={};
   if(r==='admin'){ALL_PERMS.forEach(k=>m[k]=true);return m}
   const d=roleDefault(r), o=st&&st.perms&&typeof st.perms==='object'?st.perms:{};
-  ALL_PERMS.forEach(k=>{m[k]=typeof o[k]==='boolean'?o[k]:d[k]; if(PERM_DEP[k]&&!m[PERM_DEP[k]]) m[k]=false});
+  ALL_PERMS.forEach(k=>{m[k]=typeof o[k]==='boolean'?o[k]:d[k]; if(PERM_DEP[k]&&!m[PERM_DEP[k]]) m[k]=false; if(permLocked(r,k)) m[k]=false});
   return m;
 }
 const can=k=>!!S.me&&permsOf(S.me)[k]===true;
-const restricted=()=>!can('order.all');   // không có quyền xem tất cả: chỉ thấy đơn giao hôm nay được gán cho mình
+const restricted=()=>!can('order.all');   // không có quyền xem tất cả: chỉ thấy đơn giao được gán cho mình trong 5 ngày (3 ngày trước → ngày mai)
 const NOPERM='Tài khoản này chưa được cấp quyền này.';
 const shippers=()=>S.staff.filter(s=>roleOf(s)==='shipper'&&s.active!==false).sort(byName);
 const shipperLabel=o=>{const s=o.shipperId&&S.staff.find(x=>x.id===o.shipperId);return s?s.name:(o.shipperName||'')};
 // Shipper chỉ thấy đơn giao trong ngày hôm nay được gán đúng cho mình
-const visibleOrders=()=>restricted()?S.orders.filter(o=>o.mode!=='lay'&&o.shipperId===S.me.id&&o.date===dstr(new Date())):S.orders;
+// Shipper (không có quyền xem tất cả đơn) xem được đơn giao gán cho mình trong 5 ngày: 3 ngày trước → hôm nay → ngày mai. Chỉ đơn hôm nay mới thao tác (thu tiền, đã giao) được.
+const SHIP_BACK=3, SHIP_FWD=1;
+const shipRange=()=>{const t=new Date(),a=new Date(t),b=new Date(t); a.setDate(a.getDate()-SHIP_BACK); b.setDate(b.getDate()+SHIP_FWD); return [dstr(a),dstr(b)]};
+const shipClamp=ds=>{const [lo,hi]=shipRange(); return ds<lo?lo:ds>hi?hi:ds};
+const offDay=o=>restricted()&&o.date!==dstr(new Date());          // đơn ngày khác của shipper: chỉ xem
+const visibleOrders=()=>{ if(!restricted()) return S.orders; const [lo,hi]=shipRange(); return S.orders.filter(o=>o.mode!=='lay'&&o.shipperId===S.me.id&&o.date>=lo&&o.date<=hi) };
 // Mỗi thao tác trên giao diện ứng với đúng một quyền. Thao tác không có trong bảng này bị từ chối.
 const ACT_PERM={
   nav:null,logout:null,filter:null,copy:null,close:null,'change-pw':null,'save-pw':null,theme:null,'sub-back':null,
   qty:null,gtab:null,seg:null,time:null,pick:null,unpick:null,clearcust:null,
-  day:'order.all',today:'order.all',
+  day:null,today:null,   // shipper cũng chuyển ngày được, nhưng chỉ trong 5 ngày (xem shipRange)
   layout:'order.assign','ship-filter':'order.assign','sel-unassigned':'order.assign','sel-all':'order.assign','sel-clear':'order.assign','bulk-assign':'order.assign',
   'new-order':'order.create','order-for':'order.create','save-order':'*order',
   'cmt-open':'order.create','cmt-read':'order.create','cmt-save':'order.create','cmt-back':'order.create','cmt-rmimg':'order.create','cmt-mode':'order.create','cmt-pick':'order.create','cmt-qty':'order.create','cmt-rmitem':'order.create','cmt-additem':'order.create',
@@ -186,6 +194,8 @@ function shopCodeSet(v){try{localStorage.setItem(SHOPK,v)}catch(_){}}
 function shopCodeFromUrl(){try{const v=(new URLSearchParams(location.search).get('quan')||'').trim().toLowerCase();return /^[a-z0-9]{3,30}$/.test(v)?v:''}catch(_){return ''}}
 // enableAI:false trong config.js = ẩn tính năng nhập đơn từ comment Facebook (AI); chưa cấu hình thì mặc định bật
 const AI_ON=CFG.enableAI!==false;
+// Số phiên bản hiện ở cuối Cài đặt: để biết quán/máy nào đang chạy bản nào. Đổi mỗi lần đưa bản mới lên cho khách (dạng năm.tháng.ngày).
+const APP_VERSION='2026.10.26';
 const shopCodeDefault=()=>shopCodeFromUrl()||shopCodeGet()||CFG.defaultShop||'';
 S.db=!!sb;
 const TBL={staff:'profiles',menu:'menu_items',groups:'menu_groups',customers:'customers',orders:'orders',settings:'settings',shops:'shops'};
@@ -334,7 +344,7 @@ function afterData(){
 function autoDay(){
   if(S._autoDay||!S.me||!S.loaded.settings||!S.loaded.staff) return;
   S._autoDay=true;
-  if(restricted()||S._dayTouched) return;                       // shipper chỉ xem hôm nay
+  if(restricted()||S._dayTouched) return;                       // shipper luôn mở ở hôm nay
   const n=new Date(), hm=pad(n.getHours())+':'+pad(n.getMinutes());
   if(S.date===dstr(n)&&hm>=(shop().cutoff||'17:00')){S.date=tomorrowStr();S.sel.clear();subOrders()}
 }
@@ -384,7 +394,7 @@ function render(){
   if(S.view==='customers'&&!can('cust.view')) S.view='orders';
   if(restricted()){
     if(S.filter==='noship') S.filter='all';
-    const tdy=dstr(new Date()); if(S.date!==tdy){S.date=tdy;subOrders()}
+    const [lo,hi]=shipRange(); if(S.date<lo||S.date>hi){S.date=dstr(new Date());subOrders()}
   }
   const tabs=[['orders','Đơn hàng']].concat(can('cust.view')?[['customers','Khách hàng']]:[]).concat(can('report.view')?[['report','Báo cáo']]:[]).concat([['settings','Cài đặt']]);
   let body=planBanner();
@@ -438,7 +448,14 @@ function viewOrders(){
   const cnt={all:list.length,unpaid:list.filter(o=>payOf(o)==='unpaid').length,paid:list.filter(o=>payOf(o)!=='unpaid').length,todo:list.filter(o=>!o.delivered).length,noship:list.filter(o=>o.mode!=='lay'&&!o.shipperId).length};
   const f=S.filter;
   const shown=list.filter(o=>f==='all'||(f==='unpaid'&&payOf(o)==='unpaid')||(f==='paid'&&payOf(o)!=='unpaid')||(f==='todo'&&!o.delivered)||(f==='noship'&&o.mode!=='lay'&&!o.shipperId));
-  const dayBar=sh?`<div class="datebar"><div class="datepick" style="cursor:default"><b>Hôm nay</b><span class="num">${WD[d.getDay()]}, ${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}</span></div></div>`:`<div class="datebar">
+  const dayName=ds=>{const dd=dparse(ds); return ds===dstr(new Date())?'Hôm nay':ds===tomorrowStr()?'Ngày mai':ds===dstr(new Date(Date.now()-864e5))?'Hôm qua':WD[dd.getDay()]};
+  const [shLo,shHi]=shipRange();
+  const dayBar=sh?`<div class="datebar">
+    <button class="iconbtn" data-act="day" data-d="-1" aria-label="Ngày trước" ${S.date<=shLo?'disabled':''}>‹</button>
+    <div class="datepick" style="cursor:default"><b>${dayName(S.date)}</b><span class="num">${WD[d.getDay()]}, ${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}</span></div>
+    <button class="iconbtn" data-act="day" data-d="1" aria-label="Ngày sau" ${S.date>=shHi?'disabled':''}>›</button>
+    ${isToday?'':'<button class="todaybtn" data-act="today">Hôm nay</button>'}
+  </div>${isToday?'':'<div class="banner"><span>Đơn ngày khác chỉ để xem. Thu tiền và đánh dấu đã giao ở đơn hôm nay.</span></div>'}`:`<div class="datebar">
     <button class="iconbtn" data-act="day" data-d="-1" aria-label="Ngày trước">‹</button>
     <label class="datepick"><b>${isToday?'Hôm nay':S.date===tomorrowStr()?'Ngày mai':WD[d.getDay()]}</b><span class="num">${isToday||S.date===tomorrowStr()?WD[d.getDay()]+', ':''}${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}</span><input type="date" id="datePick" aria-label="Chọn ngày"></label>
     <button class="iconbtn" data-act="day" data-d="1" aria-label="Ngày sau">›</button>
@@ -468,7 +485,7 @@ function viewOrders(){
   ${toggle}
   <div class="chips">${chips}</div>`;
   if(S.db&&!S.loaded.orders) return h+`<div class="empty"><b>Đang tải đơn…</b></div>`;
-  if(!list.length) return h+(sh?`<div class="empty"><b>Hôm nay chưa có đơn nào gán cho tài khoản này</b>Khi thu ngân gán đơn cho bạn, đơn sẽ hiện ở đây.</div>`:`<div class="empty"><b>Chưa có đơn nào ${isToday?'hôm nay':'ngày này'}</b>Bấm “+ Tạo đơn” ở trên để ghi đơn. Đơn tự xếp theo giờ giao.</div>`);
+  if(!list.length) return h+(sh?`<div class="empty"><b>${dayName(S.date)} chưa có đơn nào gán cho tài khoản này</b>Khi thu ngân gán đơn cho bạn, đơn sẽ hiện ở đây.</div>`:`<div class="empty"><b>Chưa có đơn nào ${isToday?'hôm nay':'ngày này'}</b>Bấm “+ Tạo đơn” ở trên để ghi đơn. Đơn tự xếp theo giờ giao.</div>`);
   if(lay==='assign') return h+assignView(dl,sf,list.length-dl.length);
   if(!shown.length) return h+`<div class="empty"><b>Không có đơn trong mục này</b>Chọn “Tất cả” để xem toàn bộ.</div>`;
   S._shown=shown.map(o=>o.id);
@@ -531,10 +548,10 @@ function assignView(dl,sf,nLay){
 function ticket(o,n){
   const lay=o.mode==='lay';
   const items=(o.items||[]).map(it=>`<li><span class="q">${it.qty}×</span><span class="n">${esc(it.name)}${it.note?`<em>${esc(it.note)}</em>`:''}</span><span class="p">${vnd(it.price*it.qty)}</span></li>`).join('');
-  const ro=!can('order.edit'); // không được sửa: thẻ không bấm mở được
+  const ro=!can('order.edit')||offDay(o); // không được sửa (hoặc shipper xem đơn ngày khác): thẻ không bấm mở được
   let acts='';
   if(can('order.print')) acts+=`<button class="sbtn prt" data-act="print-one" data-id="${o.id}" aria-label="In bill" title="In bill">${icon('print')}</button>`;
-  if(can('order.pay')){
+  if(can('order.pay')&&!offDay(o)){
     if(payOf(o)==='unpaid') acts+=`<button class="sbtn cash" data-act="pay" data-id="${o.id}" data-v="cash">Tiền mặt</button><button class="sbtn ck" data-act="pay" data-id="${o.id}" data-v="transfer">Chuyển khoản</button>`;
     else acts+=`<button class="sbtn paid-${payOf(o)}" data-act="pay" data-id="${o.id}" data-v="unpaid" title="Bấm để chuyển về chưa thu">✓ Đã thu ${payOf(o)==='cash'?'tiền mặt':'chuyển khoản'}</button>`;
     acts+=`<button class="sbtn ${o.delivered?'on':'dv'}" data-act="deliver" data-id="${o.id}">${o.delivered?'✓ Đã '+(lay?'lấy':'giao'):'Đã '+(lay?'lấy':'giao')}</button>`;
@@ -666,7 +683,8 @@ function viewSettings(){
   h+=`<div class="sectionlabel">Tài khoản của anh</div><div class="rows">
     ${row('change-pw','key','Đổi mật khẩu',`Đăng nhập bằng: ${esc(S.me.username)} · mã quán ${esc(shopSlug())}`)}
     ${row('logout','logout','Đăng xuất','Thoát khỏi app trên máy này')}
-  </div>`;
+  </div>
+  <p class="hint appver" style="text-align:center;margin:14px 0 4px">${CFG.brandName||'Đông Khách'} · Phiên bản ${APP_VERSION}</p>`;
   return h;
 }
 function menuRow(m){
@@ -735,7 +753,7 @@ function orderForm(o,presetCust){
       </div>
       <div class="sugg" id="sugg"></div>
       <div class="field"><label for="f_addr">Địa chỉ giao</label><input type="text" id="f_addr" value="${esc(F.address)}" placeholder="Số nhà, đường, khu…"></div>
-      <label class="check" id="saveCustWrap"><input type="checkbox" id="f_savecust" checked> Lưu khách mới vào danh sách</label>
+      ${roleOf(S.me)==='shipper'?'':'<label class="check" id="saveCustWrap"><input type="checkbox" id="f_savecust" checked> Lưu khách mới vào danh sách</label>'}
     </section>
     <section class="fs"><h4>Món</h4>
       ${rows.length?`<div class="gtabs" id="gtabs" role="tablist"></div><div class="chosen" id="chosen"></div><div id="itemList"></div>`:`<p class="hint">Chưa có món để chọn. Quản lý vào Cài đặt → Danh mục món để thêm.</p>`}
@@ -777,7 +795,7 @@ function updPicked(){
   const p=$('#picked'); if(!p)return;
   const c=F.customerId&&S.customers.find(x=>x.id===F.customerId);
   p.innerHTML=c?`<div class="picked"><span>Khách cũ: ${esc(c.name)}</span><button class="sbtn" data-act="unpick">Đổi khách</button></div>`:'';
-  $('#saveCustWrap').hidden=!!c;
+  {const w=$('#saveCustWrap'); if(w) w.hidden=!!c}
   updClear();
 }
 // Nút “Xóa hết”: hiện khi form khách có gì đó để xóa (tên, SĐT, địa chỉ hoặc khách cũ đã chọn)
@@ -805,7 +823,7 @@ async function saveOrder(btn){
   try{
     let cid=F.customerId;
     if(!cid&&F.phone){const ex=S.customers.find(c=>digits(c.phone)&&digits(c.phone)===digits(F.phone)); if(ex) cid=ex.id}
-    if(!cid&&$('#f_savecust').checked&&F.name){cid=newId('c');await put('customers',cid,{name:F.name,phone:F.phone,address:F.address,note:'',createdAt:Date.now()})}
+    if(!cid&&roleOf(S.me)!=='shipper'&&$('#f_savecust')&&$('#f_savecust').checked&&F.name){cid=newId('c');await put('customers',cid,{name:F.name,phone:F.phone,address:F.address,note:'',createdAt:Date.now()})}
     const now=Date.now(), id=F.id||newId('o');
     const doc={date:F.date,time:F.time||'',mode:F.mode,customerId:cid||'',name:F.name,phone:F.phone,address:F.address,
       items:items.map(it=>({menuId:it.menuId,name:it.name,price:it.price,qty:it.qty,note:(it.note||'').trim()})),
@@ -1349,11 +1367,12 @@ const activeAdmins=()=>S.staff.filter(s=>roleOf(s)==='admin'&&s.active!==false);
 let PF=null; // trạng thái bảng quyền đang sửa trong form nhân viên
 function permBodyHTML(){
   if(PF.role==='admin') return '<p class="hint">Quản lý có toàn quyền nên không cần chọn quyền.</p>';
-  return PERM_GROUPS.map(([g,items])=>`<div class="permgrp"><h5>${g}</h5>${items.map(([k,l,h])=>`<label class="permrow"><input type="checkbox" data-perm="${k}" ${PF.perms[k]?'checked':''}><span><b>${l}</b>${h?`<small>${h}</small>`:''}</span></label>`).join('')}</div>`).join('');
+  const note=PF.role==='shipper'?'<p class="hint">Shipper chỉ xem được đơn giao gán cho mình (3 ngày trước → ngày mai) và tên, SĐT, địa chỉ khách ghi trên các đơn đó. Không thể cấp quyền xem tất cả đơn, báo cáo, gán shipper, danh sách khách hay tạo đơn mới cho vai trò này.</p>':'';
+  return note+PERM_GROUPS.map(([g,items0])=>[g,items0.filter(([k])=>!permLocked(PF.role,k))]).filter(([g,items])=>items.length).map(([g,items])=>`<div class="permgrp"><h5>${g}</h5>${items.map(([k,l,h])=>`<label class="permrow"><input type="checkbox" data-perm="${k}" ${PF.perms[k]?'checked':''}><span><b>${l}</b>${h?`<small>${h}</small>`:''}</span></label>`).join('')}</div>`).join('');
 }
 function renderPerm(){const bd=$('#permBody'); if(bd) bd.innerHTML=permBodyHTML(); const r=$('#permReset'); if(r) r.hidden=PF.role==='admin'}
 function permToggle(t){
-  const k=t.dataset.perm; if(!PF||PF.role==='admin'||!ALL_PERMS.includes(k)) return;
+  const k=t.dataset.perm; if(!PF||PF.role==='admin'||!ALL_PERMS.includes(k)||permLocked(PF.role,k)) return;
   PF.perms[k]=t.checked;
   if(t.checked){ let p=PERM_DEP[k]; while(p){PF.perms[p]=true;p=PERM_DEP[p]} }
   else { let ch=true; while(ch){ch=false; ALL_PERMS.forEach(c=>{if(PERM_DEP[c]&&!PF.perms[PERM_DEP[c]]&&PF.perms[c]){PF.perms[c]=false;ch=true}})} }
@@ -1362,7 +1381,7 @@ function permToggle(t){
 function staffForm(s){
   const self=s&&s.id===S.me.id;
   const role0=s?roleOf(s):'cashier';
-  PF={role:role0,perms:s&&role0!=='admin'?permsOf(s):roleDefault(role0)};
+  PF={role:role0,perms:s&&role0!=='admin'?permsOf(s):roleDefault(role0)};   // permsOf đã tắt cứng các quyền xem rộng của shipper
   openSheet(`${head(s?'Sửa nhân viên':'Thêm nhân viên')}
   <div class="sh-body"><section class="fs">
     <div class="field"><label for="st_name">Họ tên</label><input type="text" id="st_name" value="${esc(s?s.name:'')}"></div>
@@ -1399,7 +1418,7 @@ async function saveStaff(btn){
   // chỉ gửi những quyền khác mặc định của vai trò
   if(PF.role!==role){PF.role=role;PF.perms=roleDefault(role)}
   let perms={};
-  if(role!=='admin'){const d=roleDefault(role); ALL_PERMS.forEach(k=>{const v=!!PF.perms[k]; if(v!==d[k]) perms[k]=v})}
+  if(role!=='admin'){const d=roleDefault(role); ALL_PERMS.forEach(k=>{if(permLocked(role,k)) return; const v=!!PF.perms[k]; if(v!==d[k]) perms[k]=v})}
   btn.disabled=true;
   try{
     if(old) await staffCall(Object.assign({action:'update',id,name,username,role,active,perms},pw?{password:pw}:{}));
@@ -1720,7 +1739,7 @@ document.addEventListener('click',async e=>{
       const done=await assignShipper(ids,v==='__none'?'':v);
       if(done) S.sel.clear(); else el.disabled=false;
       render(); break}
-    case 'day': {S._dayTouched=true; const d=dparse(S.date); d.setDate(d.getDate()+(+el.dataset.d)); S.date=dstr(d); S.sel.clear(); subOrders(); render(); break}
+    case 'day': {S._dayTouched=true; const d=dparse(S.date); d.setDate(d.getDate()+(+el.dataset.d)); S.date=restricted()?shipClamp(dstr(d)):dstr(d); S.sel.clear(); subOrders(); render(); break}
     case 'today': S._dayTouched=true; S.date=dstr(new Date()); S.sel.clear(); subOrders(); render(); break;
     case 'new-order': orderForm(null); break;
     case 'cmt-open': if(AI_ON) cmtOpen(); break;
@@ -1746,8 +1765,8 @@ document.addEventListener('click',async e=>{
     case 'edit-order': {const o=S.orders.find(x=>x.id===id); if(o) orderForm(o); break}
     case 'open-order': {const o=S.rep.orders.find(x=>x.id===id); if(o) orderForm(o); break}
     case 'copy': {const v=el.dataset.v; try{await navigator.clipboard.writeText(v);toast('Đã copy '+v)}catch(_){toast('Không copy được, bấm giữ số để chép.')} break}
-    case 'pay': {const v=el.dataset.v; el.disabled=true; try{await patch('orders',id,{payment:v,updatedAt:Date.now(),updatedBy:S.me.name}); toast(v==='unpaid'?'Đã chuyển về chưa thu':'Đã ghi nhận '+(v==='cash'?'tiền mặt':'chuyển khoản'))}catch(err){fail(err);el.disabled=false} break}
-    case 'deliver': {const o=S.orders.find(x=>x.id===id); if(!o)return; el.disabled=true; try{await patch('orders',id,{delivered:!o.delivered,updatedAt:Date.now(),updatedBy:S.me.name})}catch(err){fail(err);el.disabled=false} break}
+    case 'pay': {const v=el.dataset.v; const o0=S.orders.find(x=>x.id===id); if(o0&&offDay(o0)){toast('Đơn ngày khác chỉ để xem.');return} el.disabled=true; try{await patch('orders',id,{payment:v,updatedAt:Date.now(),updatedBy:S.me.name}); toast(v==='unpaid'?'Đã chuyển về chưa thu':'Đã ghi nhận '+(v==='cash'?'tiền mặt':'chuyển khoản'))}catch(err){fail(err);el.disabled=false} break}
+    case 'deliver': {const o=S.orders.find(x=>x.id===id); if(!o)return; if(offDay(o)){toast('Đơn ngày khác chỉ để xem.');return} el.disabled=true; try{await patch('orders',id,{delivered:!o.delivered,updatedAt:Date.now(),updatedBy:S.me.name})}catch(err){fail(err);el.disabled=false} break}
     case 'close': closeSheet(); break;
     case 'qty': {const mid=el.dataset.mid,d=+el.dataset.d; const r=F.rows.find(x=>x.menuId===mid); if(!r)return;
       const it=F.itemMap[mid]||(F.itemMap[mid]={menuId:mid,name:r.name,price:r.price,qty:0,note:''});
@@ -1829,7 +1848,7 @@ document.addEventListener('change',e=>{
   if(t.id==='imp_file'){ if(!can('cust.import')) return; const f=t.files&&t.files[0]; try{t.value=''}catch(_){} if(f) impFile(f); return}
   if(t.id==='imp_hdr'){ if(!can('cust.import')||!IMP)return; IMP.header=t.checked; if(t.checked){const d=detectHeader(IMP.rows); if(d.hits) IMP.map=d.m} renderImp(); return}
   if(t.dataset&&t.dataset.impMap){ if(!can('cust.import')||!IMP)return; IMP.map[t.dataset.impMap]=+t.value; renderImp(); return}
-  if(t.id==='datePick'&&t.value){S._dayTouched=true;S.date=t.value;S.sel.clear();subOrders();render()}
+  if(t.id==='datePick'&&t.value){S._dayTouched=true;S.date=restricted()?shipClamp(t.value):t.value;S.sel.clear();subOrders();render()}
   if(t.dataset&&t.dataset.sel!==undefined){ if(!canAssign())return; if(t.checked) S.sel.add(t.dataset.sel); else S.sel.delete(t.dataset.sel); render(); return}
   if(t.dataset&&t.dataset.shipFor){ if(!canAssign())return; assignShipper([t.dataset.shipFor],t.value); return}
   if(t.id==='bulkShip'){ if(!canAssign())return; S.bulkShip=t.value; render(); return}
