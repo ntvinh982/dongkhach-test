@@ -1,0 +1,23 @@
+{
+  "name": "dongkhach",
+  "private": true,
+  "type": "module",
+  "description": "Đông Khách — web app ghi đơn nhiều quán (Supabase)",
+  "scripts": {
+    "test:db": "bash tests/db-reset.sh",
+    "test:rls": "node tests/rls.test.mjs && node tests/tenant.test.mjs && node tests/branding-db.test.mjs",
+    "test:function": "node tests/staff-admin.test.mjs && node tests/shop-signup.test.mjs && node tests/parse-orders.test.mjs && node tests/shop-cli.test.mjs",
+    "test:web": "node tests/web.test.mjs && node tests/multishop-web.test.mjs && node tests/orders.test.mjs && node tests/import.test.mjs && node tests/perms.test.mjs && node tests/comments.test.mjs && node tests/branding-web.test.mjs",
+    "test": "npm run test:db && npm run test:rls && npm run test:function && npm run test:web",
+    "shop": "node scripts/shop.mjs"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "2.45.4",
+    "esbuild": "^0.24.0",
+    "iconv-lite": "^0.7.3",
+    "jsdom": "^25.0.0",
+    "pg": "^8.12.0",
+    "playwright-core": "^1.64.0",
+    "xlsx": "^0.18.5"
+  }
+}
