@@ -16,6 +16,24 @@ const payOf=o=>(o.payment==='cash'||o.payment==='transfer')?o.payment:'unpaid';
 const noCol=o=>!!(o.noCollect||o.payment==='free');
 const payLabel=o=>payOf(o)==='unpaid'&&noCol(o)?'Chưa thu · trả sau':PAY[payOf(o)];
 const payCls=o=>payOf(o)==='unpaid'&&noCol(o)?'later':payOf(o);
+/* ---------- loại hình kinh doanh: Ăn uống (food) hoặc Bán sản phẩm (retail). Chỉ đổi cách gọi tên và vài mặc định, không đổi dữ liệu hay quyền ---------- */
+const BIZKEY='dk_biz_v1';
+function bizType(){
+  if(S.me&&S.loaded&&S.loaded.settings){
+    const r=S.settings.find(x=>x.id==='biz'), t=r&&r.type==='retail'?'retail':'food';
+    try{const m=JSON.parse(localStorage.getItem(BIZKEY)||'{}')||{}, k=shopSlug(); if(k&&m[k]!==t){m[k]=t;localStorage.setItem(BIZKEY,JSON.stringify(m))}}catch(_){}
+    return t;
+  }
+  // chưa tải xong (màn hình đăng nhập, lúc mở app): dùng loại hình đã nhớ của quán này trên máy
+  try{const m=JSON.parse(localStorage.getItem(BIZKEY)||'{}')||{}; return m[S.me?shopSlug():shopCodeDefault()]==='retail'?'retail':'food'}catch(_){return 'food'}
+}
+const isRetail=()=>bizType()==='retail';
+// W.m = "món" / "sản phẩm", W.M = viết hoa đầu câu, W.u = đơn vị đếm trong báo cáo. Dùng trong chuỗi hiển thị: ${W.m}
+const W={get m(){return isRetail()?'sản phẩm':'món'},get M(){return isRetail()?'Sản phẩm':'Món'},get u(){return isRetail()?'sp':'phần'}};
+// Chuỗi viết sẵn ở đầu file (tên quyền, mô tả vai trò) chạy trước khi biết loại hình → đổi chữ lúc hiển thị
+const tw=s=>isRetail()?String(s).replace(/(?<![\p{L}\p{N}])([Mm])ón(?![\p{L}\p{N}])/gu,(_,c)=>c==='M'?'Sản phẩm':'sản phẩm'):s;
+// Đơn vị tính chọn nhanh trong form món / sản phẩm
+const UNITS={food:['Phần','Ly','Hộp','Chai','Lon','Cái','Kg'],retail:['Cái','Hộp','Chai','Tuýp','Lọ','Bộ','Gói','Kg']};
 const ROLE={admin:'Quản lý',cashier:'Thu ngân',shipper:'Shipper'};
 const ROLE_HINT={admin:'Toàn quyền: báo cáo, nhân viên và phân quyền, thông tin cửa hàng, xoá dữ liệu.',cashier:'Mặc định: tạo/sửa đơn, thu tiền, in bill, gán shipper, quản lý khách và món (không xoá, không xem báo cáo). Có thể chỉnh lại bên dưới.',shipper:'Mặc định: chỉ xem các đơn giao được gán cho tài khoản này trong 5 ngày (3 ngày trước, hôm nay, ngày mai), thu tiền và đánh dấu đã giao chỉ ở đơn hôm nay. Có thể cấp thêm quyền bên dưới.'};
 const roleOf=s=>!s?'':(s.role==='staff'?'cashier':s.role); // tài khoản cũ "Nhân viên" = Thu ngân
@@ -39,8 +57,8 @@ const IC={
 const icon=(k,c='ic')=>`<svg class="${c}" viewBox="0 0 24 24" aria-hidden="true">${IC[k]}</svg>`;
 
 const S={db:null,state:'connecting',authId:null,booted:false,loginMsg:'',
-  menu:[],groups:[],customers:[],orders:[],staff:[],shops:[],
-  loaded:{menu:false,groups:false,customers:false,orders:false,staff:false,settings:false,shops:false},settings:[],
+  menu:[],groups:[],customers:[],orders:[],staff:[],shops:[],costs:[],
+  loaded:{menu:false,groups:false,customers:false,orders:false,staff:false,settings:false,shops:false,costs:false},settings:[],
   me:null,view:'orders',sub:null,
   date:dstr(new Date()),filter:'all',q:'',unsub:null,
   rep:{preset:'7d',from:'',to:'',orders:[],loaded:false,unsub:null,topBy:'rev'}};
@@ -85,13 +103,14 @@ const PERM_GROUPS=[
     ['menu.delete','Xoá món, nhóm món','Cần quyền Sửa danh mục món'],
     ['shop.edit','Sửa thông tin cửa hàng và bill','']]],
   ['Báo cáo',[
-    ['report.view','Xem báo cáo doanh thu','']]]
+    ['report.view','Xem báo cáo doanh thu',''],
+    ['cost.view','Xem và sửa giá vốn, lợi nhuận','Giá vốn từng món, lãi trên báo cáo. Shipper không bao giờ được cấp']]]
 ];
 const ROLE_PERMS={admin:null,cashier:['order.all','order.create','order.edit','order.pay','order.print','order.assign','cust.view','cust.edit','menu.edit'],shipper:[]};
 const PERM_DEP={'order.assign':'order.all','order.delete':'order.edit','cust.edit':'cust.view','cust.delete':'cust.edit','menu.delete':'menu.edit'};
 const ALL_PERMS=PERM_GROUPS.flatMap(g=>g[1].map(p=>p[0]));
 // Shipper KHÔNG BAO GIỜ được xem đơn của người khác: 3 quyền này bị khoá cứng cho vai trò shipper (cả ở máy chủ lẫn ở đây).
-const SHIP_DENY=['order.all','report.view','order.assign','cust.view','cust.edit','cust.delete','cust.import','order.create'];
+const SHIP_DENY=['order.all','report.view','order.assign','cust.view','cust.edit','cust.delete','cust.import','order.create','cost.view'];
 const permLocked=(r,k)=>r==='shipper'&&SHIP_DENY.includes(k);
 const roleDefault=r=>{const l=ROLE_PERMS[r]||[],m={};ALL_PERMS.forEach(k=>m[k]=l.includes(k));return m};
 function permsOf(st){
@@ -126,7 +145,8 @@ const ACT_PERM={
   'open-order':'report.view',preset:'report.view',topby:'report.view',
   'new-cust':'cust.edit','edit-cust':'cust.edit','save-cust':'cust.edit',
   'imp-open':'cust.import','imp-paste':'cust.import','imp-mode':'cust.import','imp-run':'cust.import','imp-template':'cust.import','imp-view':'cust.import',
-  'sub-menu':'menu.edit','new-group':'menu.edit','edit-group':'menu.edit','save-group':'menu.edit','new-menu':'menu.edit','edit-menu':'menu.edit','save-menu':'menu.edit',
+  'sub-menu':'menu.edit','new-group':'menu.edit','edit-group':'menu.edit','save-group':'menu.edit','new-menu':'menu.edit','edit-menu':'menu.edit','save-menu':'menu.edit','menu-toggle':'menu.edit','unit-pick':'menu.edit',
+  'biz-form':'shop.edit','biz-pick':'shop.edit','biz-save':'shop.edit',
   'shop-form':'shop.edit','save-shop':'shop.edit','brand-form':'shop.edit','brand-save':'shop.edit','brand-accent':'shop.edit','brand-rmlogo':'shop.edit',
   'sub-staff':'admin','new-staff':'admin','edit-staff':'admin','save-staff':'admin','del-staff':'admin','perm-reset':'admin','clear-sample':'admin',
   del:'*del'
@@ -195,15 +215,16 @@ function shopCodeFromUrl(){try{const v=(new URLSearchParams(location.search).get
 // enableAI:false trong config.js = ẩn tính năng nhập đơn từ comment Facebook (AI); chưa cấu hình thì mặc định bật
 const AI_ON=CFG.enableAI!==false;
 // Số phiên bản hiện ở cuối Cài đặt: để biết quán/máy nào đang chạy bản nào. Đổi mỗi lần đưa bản mới lên cho khách (dạng năm.tháng.ngày).
-const APP_VERSION='2026.10.26';
+const APP_VERSION='2026.10.27';
 const shopCodeDefault=()=>shopCodeFromUrl()||shopCodeGet()||CFG.defaultShop||'';
 S.db=!!sb;
-const TBL={staff:'profiles',menu:'menu_items',groups:'menu_groups',customers:'customers',orders:'orders',settings:'settings',shops:'shops'};
+const TBL={staff:'profiles',menu:'menu_items',groups:'menu_groups',customers:'customers',orders:'orders',settings:'settings',shops:'shops',costs:'menu_costs'};
 // [khoá trong app, cột trong DB, cờ]. Cờ 'ts' = thời gian (đọc ra thành mili giây), 'ro' = do máy chủ ghi, không gửi lên.
 const FIELDS={
   staff:[['username','username'],['name','name'],['role','role'],['active','active'],['perms','perms'],['theme','theme'],['createdAt','created_at','ts'],['updatedBy','updated_by','ro']],
   menu:[['name','name'],['price','price'],['unit','unit'],['groupId','group_id'],['active','active'],['sample','sample'],['createdAt','created_at','ts']],
   groups:[['name','name'],['order','sort_order'],['sample','sample'],['createdAt','created_at','ts']],
+  costs:[['cost','cost'],['updatedAt','updated_at','ts']],   // giá vốn: id = id của món; chỉ người có quyền cost.view đọc/ghi được (máy chủ chặn)
   customers:[['name','name'],['phone','phone'],['address','address'],['note','note'],['sample','sample'],['imported','imported'],['createdAt','created_at','ts']],
   shops:[['name','name'],['slug','slug','ro'],['status','status','ro'],['trialEndsAt','trial_ends_at','ts'],['paidUntil','paid_until','ts'],['contactPhone','contact_phone'],['contactEmail','contact_email'],['createdAt','created_at','ts']],
   orders:[['date','date'],['time','time'],['mode','mode'],['customerId','customer_id'],['name','name'],['phone','phone'],['address','address'],['items','items'],['total','total'],['note','note'],['payment','payment'],['noCollect','no_collect'],['delivered','delivered'],['shipperId','shipper_id'],['shipperName','shipper_name'],['sample','sample','ro'],['createdAt','created_at','ts'],['updatedAt','updated_at','ts'],['createdBy','created_by','ro'],['createdById','created_by_id','ro'],['updatedBy','updated_by','ro']]
@@ -308,16 +329,16 @@ function subReport(){
 }
 function startData(){
   stopData();
-  const W=S._w=[];
-  for(const c of ['staff','shops','menu','groups','customers','settings'])
-    W.push(watch(TBL[c],null,()=>fetchAll(TBL[c]),rows=>{S[c]=rows.map(r=>fromRow(c,r));S.loaded[c]=true;afterData()}));
+  const ws=S._w=[];
+  for(const c of ['staff','shops','menu','groups','customers','settings','costs'])
+    ws.push(watch(TBL[c],null,()=>fetchAll(TBL[c]),rows=>{S[c]=rows.map(r=>fromRow(c,r));S.loaded[c]=true;afterData()}));
   subOrders();
 }
 function stopData(){
   (S._w||[]).forEach(f=>f()); S._w=[];
   if(S.unsub){S.unsub();S.unsub=null}
   if(S.rep.unsub){S.rep.unsub();S.rep.unsub=null}
-  S.menu=[];S.groups=[];S.customers=[];S.orders=[];S.staff=[];S.shops=[];S.settings=[];S.rep.orders=[];S.rep.from='';S.rep.loaded=false;
+  S.menu=[];S.groups=[];S.customers=[];S.orders=[];S.staff=[];S.shops=[];S.settings=[];S.costs=[];S.rep.orders=[];S.rep.from='';S.rep.loaded=false;
   for(const k in S.loaded) S.loaded[k]=false;
 }
 // Đăng xuất / bị khoá: dọn dữ liệu và quay về màn hình đăng nhập
@@ -653,12 +674,12 @@ function viewReport(){
   // món bán chạy
   const agg={}; r.orders.forEach(o=>{(o.items||[]).forEach(it=>{const k=it.menuId||it.name;const a=agg[k]||(agg[k]={name:it.name,qty:0,rev:0,menuId:it.menuId});a.qty+=it.qty||0;a.rev+=(it.price||0)*(it.qty||0)})});
   const by=r.topBy; const top=Object.values(agg).sort((a,b)=>b[by]-a[by]).slice(0,10); const mx=Math.max(1,...top.map(a=>a[by]));
-  h+=`<section class="card"><h3>Món bán chạy <span class="seg2"><button data-act="topby" data-v="rev" aria-pressed="${by==='rev'}">Doanh thu</button><button data-act="topby" data-v="qty" aria-pressed="${by==='qty'}">Số lượng</button></span></h3>
-    ${top.map(a=>`<div class="hbar"><span class="nm">${esc(a.name)}<small>${a.qty} phần</small></span><span class="rv">${by==='rev'?vnd(a.rev):a.qty}</span><span class="track"><i style="width:${(a[by]/mx*100).toFixed(1)}%"></i></span></div>`).join('')}</section>`;
+  h+=`<section class="card"><h3>${W.M} bán chạy <span class="seg2"><button data-act="topby" data-v="rev" aria-pressed="${by==='rev'}">Doanh thu</button><button data-act="topby" data-v="qty" aria-pressed="${by==='qty'}">Số lượng</button></span></h3>
+    ${top.map(a=>`<div class="hbar"><span class="nm">${esc(a.name)}<small>${a.qty} ${W.u}</small></span><span class="rv">${by==='rev'?vnd(a.rev):a.qty}</span><span class="track"><i style="width:${(a[by]/mx*100).toFixed(1)}%"></i></span></div>`).join('')}</section>`;
   // theo nhóm
   const gagg={}; Object.values(agg).forEach(a=>{const m=S.menu.find(x=>x.id===a.menuId);const g=groupOf(m);const k=g?g.name:'Khác';const x=gagg[k]||(gagg[k]={name:k,rev:0,qty:0});x.rev+=a.rev;x.qty+=a.qty});
   const gl=Object.values(gagg).sort((a,b)=>b.rev-a.rev); const gm=Math.max(1,...gl.map(a=>a.rev));
-  h+=`<section class="card"><h3>Theo nhóm món</h3>${gl.map(a=>`<div class="hbar"><span class="nm">${esc(a.name)}<small>${a.qty} phần</small></span><span class="rv">${vnd(a.rev)}</span><span class="track"><i style="width:${(a.rev/gm*100).toFixed(1)}%"></i></span></div>`).join('')}</section>`;
+  h+=`<section class="card"><h3>Theo nhóm ${W.m}</h3>${gl.map(a=>`<div class="hbar"><span class="nm">${esc(a.name)}<small>${a.qty} ${W.u}</small></span><span class="rv">${vnd(a.rev)}</span><span class="track"><i style="width:${(a.rev/gm*100).toFixed(1)}%"></i></span></div>`).join('')}</section>`;
   // chưa thu
   const debts=r.orders.filter(o=>payOf(o)==='unpaid').sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
   if(debts.length) h+=`<section class="card"><h3>Đơn chưa thu <small>${debts.length} đơn · ${vnd(st.due)}</small></h3>${debts.map(o=>`<div class="debt" data-act="open-order" data-id="${o.id}"><div><b>${esc(o.name||'Khách lẻ')}${noCol(o)?'<span class="nocol">trả sau</span>':''}</b><span class="num">${ddm(o.date)}${o.phone?' · '+esc(o.phone):''}</span></div><strong>${vnd(o.total)}</strong></div>`).join('')}</section>`;
@@ -674,7 +695,8 @@ function viewSettings(){
   // Giao diện: ai cũng chọn được cho tài khoản của mình, nên đặt lên đầu
   const tm=themeGet();
   h+=`<div class="sectionlabel" style="margin-top:4px">Giao diện</div><div class="fs"><div class="seg" role="group" aria-label="Giao diện">${[['light','Sáng'],['dark','Tối'],['system','Theo máy']].map(([k,l])=>`<button type="button" data-act="theme" data-v="${k}" aria-pressed="${tm===k}">${l}</button>`).join('')}</div><span class="hint">Lưu theo tài khoản của bạn: đăng nhập trên máy nào cũng dùng giao diện này. “Theo máy” tự đổi sáng/tối theo cài đặt của điện thoại, máy tính.</span></div>`;
-  const shopRows=(can('menu.edit')?row('sub-menu','menu','Danh mục món',`${S.groups.length} nhóm · ${S.menu.length} món`):'')
+  const shopRows=(can('menu.edit')?row('sub-menu','menu',`Danh mục ${W.m}`,`${S.groups.length} nhóm · ${S.menu.length} ${W.m}${S.menu.some(m=>m.active===false)?' · '+S.menu.filter(m=>m.active===false).length+' đang ẩn':''}`):'')
+    +(can('shop.edit')?row('biz-form','menu','Loại hình kinh doanh',isRetail()?'Bán sản phẩm · gọi là “sản phẩm”':'Ăn uống · gọi là “món”'):'')
     +(isAdmin()?row('sub-staff','staff','Nhân viên và phân quyền',`${S.staff.filter(x=>x.active!==false).length} tài khoản đang dùng`):'')
     +(can('cust.import')?row('imp-open','customers','Nhập khách từ Excel/CSV',`${S.customers.length} khách hiện có`):'')
     +(can('shop.edit')?row('brand-form','palette','Logo và màu giao diện',esc(accentName(brandNow().accent))+(brandNow().logo?' · đã có logo':' · chưa có logo')):'')
@@ -687,20 +709,34 @@ function viewSettings(){
   <p class="hint appver" style="text-align:center;margin:14px 0 4px">${CFG.brandName||'Đông Khách'} · Phiên bản ${APP_VERSION}</p>`;
   return h;
 }
+/* giá vốn: S.costs (chỉ có dữ liệu khi tài khoản có quyền cost.view) */
+const costOf=id=>{const r=S.costs.find(x=>x.id===id); return r&&r.cost!==''&&r.cost!=null&&Number.isFinite(Number(r.cost))?Number(r.cost):null};
+// "lãi 15.000đ (33%)" — % tính trên giá bán; giá vốn cao hơn giá bán thì báo lỗ
+const marginTxt=(price,cost)=>{const d=price-cost; return (d<0?'lỗ ':'lãi ')+vnd(Math.abs(d))+(price>0?' ('+Math.round(d/price*100)+'%)':'')};
 function menuRow(m){
-  return `<button class="rowi ${m.active===false?'off':''}" data-act="edit-menu" data-id="${m.id}">
-    <div class="main"><b>${esc(m.name)}</b></div><span class="price">${vnd(m.price)}${m.unit?`<small> /${esc(m.unit)}</small>`:''}</span></button>`;
+  const off=m.active===false, cv=can('cost.view'), c=cv?costOf(m.id):null;
+  const sub=[off?'Đang ẩn, không hiện khi tạo đơn':'', cv?(c==null?'Chưa có giá vốn':'Vốn '+vnd(c)+' · '+marginTxt(Number(m.price)||0,c)):''].filter(Boolean).join(' · ');
+  return `<div class="rowi mrow ${off?'off':''}"><button class="mmain" data-act="edit-menu" data-id="${m.id}">
+    <div class="main"><b>${esc(m.name)}</b>${sub?`<span class="${cv&&c!=null&&c>(Number(m.price)||0)?'loss':''}">${sub}</span>`:''}</div><span class="price">${vnd(m.price)}${m.unit?`<small> /${esc(m.unit)}</small>`:''}</span></button>
+    <button type="button" class="tgl" role="switch" aria-checked="${!off}" data-act="menu-toggle" data-id="${m.id}" aria-label="${off?'Hiện lại':'Ẩn'} ${esc(m.name)}" title="${off?'Đang ẩn — bấm để bán lại':'Đang bán — bấm để ẩn'}"><i></i></button></div>`;
+}
+async function menuToggle(id){
+  const m=S.menu.find(x=>x.id===id); if(!m) return;
+  const on=m.active===false;                       // đang ẩn → bật lại
+  m.active=on; render();                           // hiện ngay, máy chủ báo về sau
+  try{await patch('menu',id,{active:on}); toast(on?`Đã hiện lại “${m.name}”`:`Đã ẩn “${m.name}”, không hiện khi tạo đơn`)}
+  catch(e){m.active=!on; render(); fail(e)}
 }
 function viewMenu(){
-  let h=`<div class="pagehead"><button class="back" data-act="sub-back">‹ Cài đặt</button><h2>Danh mục món</h2></div>
-  <div class="toolbar"><span class="hint" style="flex:1">Bấm tên nhóm để đổi thứ tự (0 = ẩn khi tạo đơn).</span><button class="btn" data-act="new-group">+ Nhóm</button><button class="btn primary" data-act="new-menu">+ Món</button></div>`;
-  if(S.db&&(!S.loaded.menu||!S.loaded.groups)) return h+`<div class="empty"><b>Đang tải món…</b></div>`;
-  if(!S.menu.length&&!S.groups.length) return h+`<div class="empty"><b>Chưa có nhóm món nào</b>Tạo nhóm trước (VD: Cơm, Topping, Nước), rồi thêm món vào nhóm.</div>`;
+  let h=`<div class="pagehead"><button class="back" data-act="sub-back">‹ Cài đặt</button><h2>Danh mục ${W.m}</h2></div>
+  <div class="toolbar"><span class="hint" style="flex:1">Bấm tên nhóm để đổi thứ tự (0 = ẩn khi tạo đơn). Công tắc bên phải: bán / ẩn ${W.m}.</span><button class="btn" data-act="new-group">+ Nhóm</button><button class="btn primary" data-act="new-menu">+ ${W.M}</button></div>`;
+  if(S.db&&(!S.loaded.menu||!S.loaded.groups)) return h+`<div class="empty"><b>Đang tải ${W.m}…</b></div>`;
+  if(!S.menu.length&&!S.groups.length) return h+`<div class="empty"><b>Chưa có nhóm ${W.m} nào</b>Tạo nhóm trước (VD: ${isRetail()?'Chăm sóc da, Trang điểm, Phụ kiện':'Cơm, Topping, Nước'}), rồi thêm ${W.m} vào nhóm.</div>`;
   const sortItems=l=>l.sort((a,b)=>(a.active===false)-(b.active===false)||byName(a,b));
   for(const g of groupsSorted()){
     const o=gOrd(g); const items=sortItems(S.menu.filter(m=>m.groupId===g.id));
-    h+=`<div class="ghead"><button class="gname" data-act="edit-group" data-id="${g.id}"><b>${esc(g.name)}</b><span class="ord ${o?'':'hid'}">${o?'Thứ tự '+o:'Ẩn khi tạo đơn'}</span><span class="hint">${items.length} món</span></button><button class="sbtn" data-act="new-menu" data-gid="${g.id}">+ Món</button></div>
-    <div class="rows">${items.length?items.map(menuRow).join(''):'<div class="none">Chưa có món trong nhóm này.</div>'}</div>`;
+    h+=`<div class="ghead"><button class="gname" data-act="edit-group" data-id="${g.id}"><b>${esc(g.name)}</b><span class="ord ${o?'':'hid'}">${o?'Thứ tự '+o:'Ẩn khi tạo đơn'}</span><span class="hint">${items.length} ${W.m}</span></button><button class="sbtn" data-act="new-menu" data-gid="${g.id}">+ ${W.M}</button></div>
+    <div class="rows">${items.length?items.map(menuRow).join(''):`<div class="none">Chưa có ${W.m} trong nhóm này.</div>`}</div>`;
   }
   const loose=sortItems(S.menu.filter(m=>!groupOf(m)));
   if(loose.length) h+=`<div class="ghead"><span class="gname"><b>Chưa xếp nhóm</b></span></div><div class="rows">${loose.map(menuRow).join('')}</div>`;
@@ -710,7 +746,7 @@ function viewStaff(){
   const rank={admin:0,cashier:1,shipper:2};
   const list=[...S.staff].sort((a,b)=>(a.active===false)-(b.active===false)||(rank[roleOf(a)]??9)-(rank[roleOf(b)]??9)||byName(a,b));
   return `<div class="pagehead"><button class="back" data-act="sub-back">‹ Cài đặt</button><h2>Nhân viên</h2><button class="btn primary" data-act="new-staff">+ Thêm</button></div>
-  <div class="hint" style="margin:0 2px 10px;display:flex;flex-direction:column;gap:2px"><span><b>Quản lý:</b> ${ROLE_HINT.admin}</span><span><b>Thu ngân:</b> ${ROLE_HINT.cashier}</span><span><b>Shipper:</b> ${ROLE_HINT.shipper}</span><span>Bấm vào từng người để chỉnh quyền chi tiết.</span></div>
+  <div class="hint" style="margin:0 2px 10px;display:flex;flex-direction:column;gap:2px"><span><b>Quản lý:</b> ${tw(ROLE_HINT.admin)}</span><span><b>Thu ngân:</b> ${tw(ROLE_HINT.cashier)}</span><span><b>Shipper:</b> ${tw(ROLE_HINT.shipper)}</span><span>Bấm vào từng người để chỉnh quyền chi tiết.</span></div>
   <div class="rows">${list.map(s=>`<button class="rowi" data-act="edit-staff" data-id="${s.id}"><div class="main"><b>${esc(s.name)}${s.id===S.me.id?' (anh)':''}</b><span>${esc(s.username)}${roleOf(s)!=='admin'&&s.perms&&Object.keys(s.perms).length?' · quyền tuỳ chỉnh':''}</span></div>
     ${s.active===false?'<span class="role lock">Đã khoá</span>':`<span class="role ${roleOf(s)==='admin'?'':'staff'}">${ROLE[roleOf(s)]||''}</span>`}${icon('chev','ic chev')}</button>`).join('')}</div>`;
 }
@@ -755,8 +791,8 @@ function orderForm(o,presetCust){
       <div class="field"><label for="f_addr">Địa chỉ giao</label><input type="text" id="f_addr" value="${esc(F.address)}" placeholder="Số nhà, đường, khu…"></div>
       ${roleOf(S.me)==='shipper'?'':'<label class="check" id="saveCustWrap"><input type="checkbox" id="f_savecust" checked> Lưu khách mới vào danh sách</label>'}
     </section>
-    <section class="fs"><h4>Món</h4>
-      ${rows.length?`<div class="gtabs" id="gtabs" role="tablist"></div><div class="chosen" id="chosen"></div><div id="itemList"></div>`:`<p class="hint">Chưa có món để chọn. Quản lý vào Cài đặt → Danh mục món để thêm.</p>`}
+    <section class="fs"><h4>${W.M}</h4>
+      ${rows.length?`<div class="gtabs" id="gtabs" role="tablist"></div><div class="chosen" id="chosen"></div><div id="itemList"></div>`:`<p class="hint">Chưa có ${W.m} để chọn. Quản lý vào Cài đặt → Danh mục ${W.m} để thêm.</p>`}
     </section>
     <section class="fs"><h4>Giao nhận</h4>
       ${seg('mode',[['giao','Giao tận nơi'],['lay','Khách ghé lấy']])}
@@ -787,7 +823,7 @@ function renderItems(){
   box.innerHTML=F.rows.filter(r=>r.gid===F.tab).map(r=>{const it=F.itemMap[r.menuId];const q=it?it.qty:0;return `<div class="irow ${q?'on':''}" data-mid="${r.menuId}">
       <div class="iname" data-act="qty" data-mid="${r.menuId}" data-d="1"><span>${esc(r.name)}</span><small>${vnd(r.price)}${r.unit?' / '+esc(r.unit):''}</small></div>
       <div class="stepper"><button type="button" data-act="qty" data-mid="${r.menuId}" data-d="-1" aria-label="Bớt">−</button><output class="num">${q}</output><button type="button" data-act="qty" data-mid="${r.menuId}" data-d="1" aria-label="Thêm">+</button></div>
-      <input type="text" class="inote" id="note_${r.menuId}" data-mid="${r.menuId}" placeholder="Ghi chú món: ít cơm, không hành…" value="${esc(it?it.note:'')}" ${q?'':'hidden'}>
+      <input type="text" class="inote" id="note_${r.menuId}" data-mid="${r.menuId}" placeholder="${isRetail()?'Ghi chú: màu, dung tích, quà tặng…':'Ghi chú món: ít cơm, không hành…'}" value="${esc(it?it.note:'')}" ${q?'':'hidden'}>
     </div>`}).join('');
   updTabs();
 }
@@ -815,7 +851,7 @@ function updSugg(){
 async function saveOrder(btn){
   if(!can(F&&F.id?'order.edit':'order.create')){toast(NOPERM);return}
   const items=Object.values(F.itemMap).filter(it=>it.qty>0);
-  if(!items.length){toast('Chọn ít nhất một món.');return}
+  if(!items.length){toast(`Chọn ít nhất một ${W.m}.`);return}
   F.name=$('#f_name').value.trim();F.phone=$('#f_phone').value.trim();F.address=$('#f_addr').value.trim();
   F.time=$('#f_time').value;F.date=$('#f_date').value||S.date;F.note=$('#f_note').value.trim();
   if(!F.name&&!F.phone){toast('Nhập tên hoặc số điện thoại khách.');return}
@@ -889,7 +925,7 @@ const cmTotal=d=>d.items.reduce((s,it)=>{const m=cmMenu(it.mid);return s+(m?m.pr
 function cmMenuOpts(sel){
   const act=S.menu.filter(m=>m.active!==false).sort(byName), used=new Set();
   const opt=m=>`<option value="${m.id}" ${m.id===sel?'selected':''}>${esc(m.name)} · ${vnd(m.price)}</option>`;
-  let h='<option value="">— Chọn món —</option>';
+  let h=`<option value="">— Chọn ${W.m} —</option>`;
   for(const g of groupsSorted()){const ms=act.filter(m=>m.groupId===g.id); if(!ms.length) continue; ms.forEach(m=>used.add(m.id)); h+=`<optgroup label="${esc(g.name)}">${ms.map(opt).join('')}</optgroup>`}
   const rest=act.filter(m=>!used.has(m.id)); if(rest.length) h+=`<optgroup label="Khác">${rest.map(opt).join('')}</optgroup>`;
   return h;
@@ -920,10 +956,10 @@ function renderCmt(){
   const todo=CM.drafts.filter(d=>d.on&&!d.done).length;
   openSheet(`${head('Xem lại đơn nháp',`Đọc được ${CM.drafts.length} đơn${CM.ignored.length?' · bỏ qua '+CM.ignored.length+' dòng':''}`)}
   <div class="sh-body">
-    <p class="hint">AI có thể đọc sai. Kiểm tra món, size, giờ của từng đơn rồi mới tạo. Bỏ tick đơn nào không muốn tạo.</p>
+    <p class="hint">AI có thể đọc sai. Kiểm tra ${W.m}, size, giờ của từng đơn rồi mới tạo. Bỏ tick đơn nào không muốn tạo.</p>
     ${CM.err?`<div class="banner warn" role="alert">${esc(CM.err)}</div>`:''}
     ${CM.drafts.map(cmCard).join('')||'<div class="empty"><b>Không đọc được đơn nào</b>Thử dán rõ hơn hoặc thêm ảnh chụp.</div>'}
-    ${CM.ignored.length?`<details class="cm-ign"><summary>${CM.ignored.length} dòng đã bỏ qua (không phải đặt món)</summary><ul>${CM.ignored.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></details>`:''}
+    ${CM.ignored.length?`<details class="cm-ign"><summary>${CM.ignored.length} dòng đã bỏ qua (không phải đặt ${W.m})</summary><ul>${CM.ignored.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></details>`:''}
   </div>
   <div class="sh-foot"><button class="btn" data-act="cmt-back">‹ Đọc lại</button><button class="btn primary" data-act="cmt-save" ${todo?'':'disabled'}>Tạo ${todo} đơn</button></div>`);
   const nb=document.querySelector('#sheetBox .sh-body'); if(nb&&top) nb.scrollTop=top;
@@ -933,12 +969,12 @@ function cmCard(d,i){
   const ms=cmChoices(d), cf=CONF[d.conf]||CONF.medium;
   const cust=ms.length?`<div class="field"><label for="cm_c${i}">Khách cũ trùng tên/SĐT</label><select id="cm_c${i}" data-cm="cust" data-i="${i}"><option value="">— Khách mới —</option>${ms.map(c=>`<option value="${c.id}" ${c.id===d.custId?'selected':''}>${esc(c.name)} · ${esc(c.phone||'chưa có SĐT')}${c.address?' · '+esc(c.address.slice(0,30)):''}</option>`).join('')}</select></div>`:'';
   const rows=d.items.map((it,j)=>`<div class="cm-item ${it.mid?'':'bad'}">
-      <select data-cm="item-mid" data-i="${i}" data-j="${j}" aria-label="Món">${cmMenuOpts(it.mid)}</select>
+      <select data-cm="item-mid" data-i="${i}" data-j="${j}" aria-label="${W.M}">${cmMenuOpts(it.mid)}</select>
       <div class="stepper"><button type="button" data-act="cmt-qty" data-i="${i}" data-j="${j}" data-d="-1" aria-label="Bớt">−</button><output class="num">${it.qty}</output><button type="button" data-act="cmt-qty" data-i="${i}" data-j="${j}" data-d="1" aria-label="Thêm">+</button></div>
       <span class="cm-lp num">${cmMenu(it.mid)?vnd(cmMenu(it.mid).price*it.qty):''}</span>
-      <button type="button" class="sbtn" data-act="cmt-rmitem" data-i="${i}" data-j="${j}" aria-label="Xoá món">×</button>
-      <input type="text" class="cm-inote" data-cm="item-note" data-i="${i}" data-j="${j}" placeholder="Ghi chú món" value="${esc(it.note)}">
-      ${it.mid?'':`<small class="cm-miss">Chưa chọn món${it.text?' · khách viết: “'+esc(it.text)+'”':''}</small>`}
+      <button type="button" class="sbtn" data-act="cmt-rmitem" data-i="${i}" data-j="${j}" aria-label="Xoá ${W.m}">×</button>
+      <input type="text" class="cm-inote" data-cm="item-note" data-i="${i}" data-j="${j}" placeholder="Ghi chú ${W.m}" value="${esc(it.note)}">
+      ${it.mid?'':`<small class="cm-miss">Chưa chọn ${W.m}${it.text?' · khách viết: “'+esc(it.text)+'”':''}</small>`}
     </div>`).join('');
   return `<section class="cm-card ${d.on?'':'off'} ${d.done?'done':''}" data-card="${i}">
     <div class="cm-top"><label class="check"><input type="checkbox" data-cm="on" data-i="${i}" ${d.on&&!d.done?'checked':''} ${d.done?'disabled':''}><b>Đơn ${i+1}</b></label>
@@ -957,7 +993,7 @@ function cmCard(d,i){
       <div class="field"><label for="cm_t${i}">Trước mấy giờ</label><input type="time" id="cm_t${i}" data-cm="time" data-i="${i}" value="${esc(d.time)}"></div>
       <div class="field"><label for="cm_d${i}">Ngày</label><input type="date" id="cm_d${i}" data-cm="date" data-i="${i}" value="${esc(d.date)}"></div>
     </div>
-    <div class="cm-items">${rows}<button type="button" class="sbtn" data-act="cmt-additem" data-i="${i}">+ Thêm món</button></div>
+    <div class="cm-items">${rows}<button type="button" class="sbtn" data-act="cmt-additem" data-i="${i}">+ Thêm ${W.m}</button></div>
     <div class="field"><label for="cm_o${i}">Ghi chú đơn</label><input type="text" id="cm_o${i}" data-cm="note" data-i="${i}" value="${esc(d.note)}"></div>
     <div class="cm-sum"><small>Thành tiền</small><strong class="num" id="cm_tot${i}">${vnd(cmTotal(d))}</strong></div>
   </section>`;
@@ -1048,8 +1084,8 @@ async function cmtSave(btn){
   const errs=[];
   CM.drafts.forEach((d,i)=>{ if(!d.on||d.done) return;
     if(!d.name.trim()&&!d.phone.trim()) errs.push(`Đơn ${i+1}: thiếu tên khách`);
-    else if(!d.items.length) errs.push(`Đơn ${i+1}: chưa có món`);
-    else if(d.items.some(it=>!it.mid)) errs.push(`Đơn ${i+1}: còn món chưa chọn`);
+    else if(!d.items.length) errs.push(`Đơn ${i+1}: chưa có ${W.m}`);
+    else if(d.items.some(it=>!it.mid)) errs.push(`Đơn ${i+1}: còn ${W.m} chưa chọn`);
     else if(!/^\d{4}-\d{2}-\d{2}$/.test(d.date)) errs.push(`Đơn ${i+1}: ngày không hợp lệ`) });
   if(errs.length){CM.err=errs.join(' · ')+'. Sửa hoặc bỏ tick đơn đó.'; renderCmt(); const f=document.querySelector('.cm-item.bad,.cm-card:not(.off)'); if(f&&f.scrollIntoView) try{f.scrollIntoView({block:'center'})}catch(_){} return}
   btn.disabled=true; CM.err='';
@@ -1080,12 +1116,12 @@ async function cmtSave(btn){
 function groupForm(g){
   const n=g?S.menu.filter(m=>m.groupId===g.id).length:0;
   const next=g?gOrd(g):(Math.max(0,...S.groups.map(gOrd))+1);
-  openSheet(`${head(g?'Sửa nhóm món':'Thêm nhóm món')}
+  openSheet(`${head(g?`Sửa nhóm ${W.m}`:`Thêm nhóm ${W.m}`)}
   <div class="sh-body"><section class="fs">
-    <div class="field"><label for="g_name">Tên nhóm</label><input type="text" id="g_name" value="${esc(g?g.name:'')}" placeholder="VD: Cơm, Topping, Nước"></div>
+    <div class="field"><label for="g_name">Tên nhóm</label><input type="text" id="g_name" value="${esc(g?g.name:'')}" placeholder="VD: ${isRetail()?'Chăm sóc da, Trang điểm':'Cơm, Topping, Nước'}"></div>
     <div class="field"><label for="g_order">Thứ tự hiển thị</label><input inputmode="numeric" id="g_order" value="${next}"><span class="hint">0 = ẩn khi tạo đơn. 1, 2, 3… = thứ tự tab trong form tạo đơn.</span></div>
   </section>
-  ${g&&can('menu.delete')?`<div><button class="btn danger" data-act="del" data-col="groups" data-id="${g.id}">Xoá nhóm</button></div>${n?`<p class="hint">${n} món trong nhóm sẽ chuyển sang “Chưa xếp nhóm”, không bị xoá.</p>`:''}`:''}
+  ${g&&can('menu.delete')?`<div><button class="btn danger" data-act="del" data-col="groups" data-id="${g.id}">Xoá nhóm</button></div>${n?`<p class="hint">${n} ${W.m} trong nhóm sẽ chuyển sang “Chưa xếp nhóm”, không bị xoá.</p>`:''}`:''}
   </div>
   <div class="sh-foot"><span></span><button class="btn primary" data-act="save-group" data-id="${g?g.id:''}">Lưu nhóm</button></div>`);
   if(!g) setTimeout(()=>$('#g_name').focus(),50);
@@ -1101,30 +1137,72 @@ async function saveGroup(btn){
 function menuForm(m,presetGid){
   const gid=m?(groupOf(m)?m.groupId:''):(presetGid||'');
   const opts=groupsSorted().map(g=>`<option value="${g.id}" ${g.id===gid?'selected':''}>${esc(g.name)}${gOrd(g)?'':' (ẩn)'}</option>`).join('');
-  openSheet(`${head(m?'Sửa món':'Thêm món')}
+  const cv=can('cost.view'), c=m&&cv?costOf(m.id):null, units=UNITS[bizType()];
+  openSheet(`${head(m?`Sửa ${W.m}`:`Thêm ${W.m}`)}
   <div class="sh-body"><section class="fs">
-    <div class="field"><label for="m_name">Tên món</label><input type="text" id="m_name" value="${esc(m?m.name:'')}" placeholder="VD: Cơm Gà Mắm Tỏi"></div>
-    <div class="field"><label for="m_group">Nhóm món</label><select id="m_group"><option value="" ${gid?'':'selected'}>Chưa xếp nhóm</option>${opts}</select></div>
+    <div class="field"><label for="m_name">Tên ${W.m}</label><input type="text" id="m_name" value="${esc(m?m.name:'')}" placeholder="${isRetail()?'VD: Son kem lì 03':'VD: Cơm Gà Mắm Tỏi'}"></div>
+    <div class="field"><label for="m_group">Nhóm ${W.m}</label><select id="m_group"><option value="" ${gid?'':'selected'}>Chưa xếp nhóm</option>${opts}</select></div>
     <div class="grid2">
-      <div class="field"><label for="m_price">Giá (đồng)</label><input inputmode="numeric" id="m_price" value="${m?m.price:''}" placeholder="VD: 45000"><span class="hint" id="m_prev"></span></div>
-      <div class="field"><label for="m_unit">Đơn vị tính</label><input type="text" id="m_unit" value="${esc(m?m.unit||'':'Phần')}" placeholder="Phần, Hộp, Chai…"></div>
+      <div class="field"><label for="m_price">Giá bán (đồng)</label><input inputmode="numeric" id="m_price" value="${m?m.price:''}" placeholder="VD: 45000"><span class="hint" id="m_prev"></span></div>
+      ${cv?`<div class="field"><label for="m_cost">Giá vốn (đồng)</label><input inputmode="numeric" id="m_cost" autocomplete="off" value="${c!=null?c:''}" placeholder="Chưa có"><span class="hint" id="m_margin"></span></div>`:''}
     </div>
-    <label class="check"><input type="checkbox" id="m_active" ${!m||m.active!==false?'checked':''}> Còn bán</label>
+    <div class="field"><label for="m_unit">Đơn vị tính</label><input type="text" id="m_unit" value="${esc(m?m.unit||'':units[0])}" placeholder="${units.slice(0,3).join(', ')}…">
+      <div class="unitchips">${units.map(u=>`<button type="button" class="chip" data-act="unit-pick" data-v="${esc(u)}">${esc(u)}</button>`).join('')}</div></div>
+    <label class="check"><input type="checkbox" id="m_active" ${!m||m.active!==false?'checked':''}> Đang bán</label><span class="hint" style="margin-top:-6px">Bỏ tick = ẩn, không hiện khi tạo đơn (bật lại lúc nào cũng được).</span>
+    ${cv?`<span class="hint">Giá vốn chỉ người có quyền “Xem và sửa giá vốn” mới thấy. Đơn đã bán giữ giá vốn lúc bán, đổi ở đây chỉ áp dụng cho đơn mới.</span>`:''}
   </section>
-  ${m&&can('menu.delete')?`<div><button class="btn danger" data-act="del" data-col="menu" data-id="${m.id}">Xoá món</button></div><p class="hint">Xoá món không ảnh hưởng các đơn cũ đã ghi.</p>`:''}
+  ${m&&can('menu.delete')?`<div><button class="btn danger" data-act="del" data-col="menu" data-id="${m.id}">Xoá ${W.m}</button></div><p class="hint">Xoá ${W.m} không ảnh hưởng các đơn cũ đã ghi. Muốn tạm ngừng bán thì bỏ tick “Đang bán” thay vì xoá.</p>`:''}
   </div>
-  <div class="sh-foot"><span></span><button class="btn primary" data-act="save-menu" data-id="${m?m.id:''}">Lưu món</button></div>`);
-  const pv=()=>{$('#m_prev').textContent=digits($('#m_price').value)?'= '+vnd(+digits($('#m_price').value)):''};pv();
-  $('#m_price').addEventListener('input',pv);
+  <div class="sh-foot"><span></span><button class="btn primary" data-act="save-menu" data-id="${m?m.id:''}">Lưu ${W.m}</button></div>`);
+  const pv=()=>{
+    const p=+digits($('#m_price').value); $('#m_prev').textContent=p?'= '+vnd(p):'';
+    const mg=$('#m_margin'); if(!mg) return;
+    const cs=$('#m_cost').value.trim(), cn=+digits(cs);
+    mg.textContent=cs&&p?marginTxt(p,cn):cs?'= '+vnd(cn):''; mg.classList.toggle('loss',!!(cs&&p&&cn>p));
+  };pv();
+  $('#m_price').addEventListener('input',pv); if($('#m_cost')) $('#m_cost').addEventListener('input',pv);
   if(!m) setTimeout(()=>$('#m_name').focus(),50);
 }
 async function saveMenu(btn){
   const name=$('#m_name').value.trim(), price=+digits($('#m_price').value);
-  if(!name){toast('Nhập tên món.');return} if(!price){toast('Nhập giá món.');return}
+  if(!name){toast(`Nhập tên ${W.m}.`);return} if(!price){toast(`Nhập giá bán ${W.m}.`);return}
+  const ce=$('#m_cost'), cs=ce?ce.value.trim():'', cost=cs===''?null:+digits(cs);
+  if(ce&&cs!==''&&!/\d/.test(cs)){toast('Giá vốn chỉ nhập số.');return}
   btn.disabled=true;
   const id=btn.dataset.id||newId('m'); const old=S.menu.find(x=>x.id===id);
   const doc={name,price,unit:$('#m_unit').value.trim(),groupId:$('#m_group').value,active:$('#m_active').checked,createdAt:old?.createdAt||Date.now()}; if(old?.sample) doc.sample=true;
-  try{await put('menu',id,doc);closeSheet();toast('Đã lưu món')}catch(e){fail(e);btn.disabled=false}
+  try{
+    await put('menu',id,doc);                                  // lưu món trước (giá vốn gắn vào món)
+    if(ce&&can('cost.view')){
+      const cur=costOf(id);
+      try{
+        if(cost===null&&cur!==null) await del('costs',id);
+        else if(cost!==null&&cost!==cur) await put('costs',id,{cost});
+      }catch(e){ if(!old) S.menu.push(Object.assign({id},doc)); closeSheet(); toast(`Đã lưu ${W.m}, nhưng chưa lưu được giá vốn. Mở lại để nhập giá vốn.`); console.error(e); return }
+    }
+    closeSheet(); toast(`Đã lưu ${W.m}`);
+  }catch(e){fail(e);btn.disabled=false}
+}
+/* loại hình kinh doanh (Cài đặt): chỉ đổi cách gọi tên và mặc định, dữ liệu giữ nguyên */
+let BZ='food';
+function bizForm(){
+  BZ=bizType();
+  openSheet(`${head('Loại hình kinh doanh','Đổi cách gọi tên, không ảnh hưởng dữ liệu đã có')}
+  <div class="sh-body"><section class="fs">
+    <div class="seg" role="group" aria-label="Loại hình kinh doanh">${[['food','Ăn uống'],['retail','Bán sản phẩm']].map(([k,l])=>`<button type="button" data-act="biz-pick" data-v="${k}" aria-pressed="${BZ===k}">${l}</button>`).join('')}</div>
+    <span class="hint"><b>Ăn uống</b>: quán cơm, bún, cà phê, trà sữa… gọi là “món”, đơn vị mặc định “Phần”.<br><b>Bán sản phẩm</b>: mỹ phẩm, quần áo, đồ gia dụng… gọi là “sản phẩm”, đơn vị mặc định “Cái”.<br>Đổi qua lại lúc nào cũng được, dữ liệu giữ nguyên.</span>
+  </section></div>
+  <div class="sh-foot"><span></span><button class="btn primary" data-act="biz-save">Lưu</button></div>`);
+}
+async function bizSave(btn){
+  const type=BZ==='retail'?'retail':'food';
+  btn.disabled=true;
+  try{
+    await put('settings','biz',{type});
+    const i=S.settings.findIndex(x=>x.id==='biz'), row={id:'biz',type};
+    if(i>=0) S.settings[i]=row; else S.settings.push(row);      // hiện ngay, không chờ máy chủ báo về
+    closeSheet(); render(); toast('Đã đổi loại hình: '+(type==='retail'?'Bán sản phẩm':'Ăn uống'));
+  }catch(e){fail(e);btn.disabled=false}
 }
 function custForm(c){
   const n=c?S.orders.filter(o=>o.customerId===c.id).length:0;
@@ -1367,8 +1445,8 @@ const activeAdmins=()=>S.staff.filter(s=>roleOf(s)==='admin'&&s.active!==false);
 let PF=null; // trạng thái bảng quyền đang sửa trong form nhân viên
 function permBodyHTML(){
   if(PF.role==='admin') return '<p class="hint">Quản lý có toàn quyền nên không cần chọn quyền.</p>';
-  const note=PF.role==='shipper'?'<p class="hint">Shipper chỉ xem được đơn giao gán cho mình (3 ngày trước → ngày mai) và tên, SĐT, địa chỉ khách ghi trên các đơn đó. Không thể cấp quyền xem tất cả đơn, báo cáo, gán shipper, danh sách khách hay tạo đơn mới cho vai trò này.</p>':'';
-  return note+PERM_GROUPS.map(([g,items0])=>[g,items0.filter(([k])=>!permLocked(PF.role,k))]).filter(([g,items])=>items.length).map(([g,items])=>`<div class="permgrp"><h5>${g}</h5>${items.map(([k,l,h])=>`<label class="permrow"><input type="checkbox" data-perm="${k}" ${PF.perms[k]?'checked':''}><span><b>${l}</b>${h?`<small>${h}</small>`:''}</span></label>`).join('')}</div>`).join('');
+  const note=PF.role==='shipper'?'<p class="hint">Shipper chỉ xem được đơn giao gán cho mình (3 ngày trước → ngày mai) và tên, SĐT, địa chỉ khách ghi trên các đơn đó. Không thể cấp quyền xem tất cả đơn, báo cáo, giá vốn, gán shipper, danh sách khách hay tạo đơn mới cho vai trò này.</p>':'';
+  return note+PERM_GROUPS.map(([g,items0])=>[g,items0.filter(([k])=>!permLocked(PF.role,k))]).filter(([g,items])=>items.length).map(([g,items])=>`<div class="permgrp"><h5>${tw(g)}</h5>${items.map(([k,l,h])=>`<label class="permrow"><input type="checkbox" data-perm="${k}" ${PF.perms[k]?'checked':''}><span><b>${tw(l)}</b>${h?`<small>${tw(h)}</small>`:''}</span></label>`).join('')}</div>`).join('');
 }
 function renderPerm(){const bd=$('#permBody'); if(bd) bd.innerHTML=permBodyHTML(); const r=$('#permReset'); if(r) r.hidden=PF.role==='admin'}
 function permToggle(t){
@@ -1399,7 +1477,7 @@ function staffForm(s){
   </div>
   <div class="sh-foot"><span></span><button class="btn primary" data-act="save-staff" data-id="${s?s.id:''}">Lưu</button></div>`);
   renderPerm();
-  const rh=()=>{const h=$('#st_rolehint'); if(h) h.textContent=ROLE_HINT[$('#st_role').value]||''};
+  const rh=()=>{const h=$('#st_rolehint'); if(h) h.textContent=tw(ROLE_HINT[$('#st_role').value]||'')};
   rh(); $('#st_role').addEventListener('change',()=>{PF.role=$('#st_role').value; PF.perms=roleDefault(PF.role); renderPerm(); rh()});
   if(!s) setTimeout(()=>$('#st_name').focus(),50);
 }
@@ -1804,6 +1882,11 @@ document.addEventListener('click',async e=>{
     case 'new-menu': menuForm(null,el.dataset.gid); break;
     case 'edit-menu': {const m=S.menu.find(x=>x.id===id); if(m) menuForm(m); break}
     case 'save-menu': saveMenu(el); break;
+    case 'menu-toggle': menuToggle(id); break;
+    case 'unit-pick': {const u=$('#m_unit'); if(u){u.value=el.dataset.v; u.focus()} break}
+    case 'biz-form': bizForm(); break;
+    case 'biz-pick': BZ=el.dataset.v; el.parentNode.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b===el))); break;
+    case 'biz-save': bizSave(el); break;
     case 'new-staff': staffForm(null); break;
     case 'edit-staff': {const s=S.staff.find(x=>x.id===id); if(s) staffForm(s); break}
     case 'save-staff': saveStaff(el); break;
