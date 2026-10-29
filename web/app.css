@@ -75,10 +75,13 @@ button,input,textarea,select{font:inherit;color:inherit}
 .banner.warn{background:var(--due-soft);color:var(--due)}
 .list{display:flex;flex-direction:column;gap:10px}
 .ticket{display:grid;grid-template-columns:72px minmax(0,1fr);background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);cursor:pointer;overflow:hidden}
-.ticket.done{opacity:.55}
+.ticket.done{border:1.5px solid var(--brand);border-color:color-mix(in srgb,var(--brand) 55%,var(--line))}
 .stub{background:var(--stub);color:var(--stub-ink);display:flex;flex-direction:column;align-items:center;padding:12px 4px;gap:1px;border-right:2px dashed var(--bg)}
 .ticket.lay .stub{background:var(--lay);color:var(--lay-ink)}
-.ticket.done .stub{background:var(--surface-2);color:var(--muted)}
+.ticket.done .stub{background:var(--brand);color:var(--brand-fg);gap:3px;padding-top:10px}
+.stub .sck{width:30px;height:30px;border-radius:50%;background:var(--brand-fg);color:var(--brand);display:grid;place-items:center}
+.stub .sck .ic{width:18px;height:18px;stroke-width:2.6}
+.stub .ht{font-size:.74rem;font-weight:700;opacity:.9;font-variant-numeric:tabular-nums}
 .stub .pre{font-size:.7rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;line-height:1}
 .stub .t{font-weight:800;font-size:1.35rem;line-height:1.1;font-variant-numeric:tabular-nums}
 .stub .t.none{font-size:1rem;opacity:.6}
@@ -124,7 +127,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .ohead{display:none}
 .orow{display:grid;grid-template-columns:46px minmax(0,1fr) auto;grid-template-areas:"time cust tot" ". meta meta";gap:5px 8px;padding:11px 12px;border-bottom:1px solid var(--line);cursor:pointer;align-items:start}
 .orow:active{background:var(--surface-2)}
-.orow.done .c-time,.orow.done .c-cust{opacity:.6}
+.orow.done .c-time{color:var(--brand)}
 .c-time{grid-area:time;font-weight:800;font-size:1rem;line-height:1.3;color:var(--stub-ink)}
 .c-cust{grid-area:cust;min-width:0;font-weight:800;font-size:1rem;line-height:1.3;overflow-wrap:anywhere}
 .c-tot{grid-area:tot;font-weight:800;font-size:1rem;line-height:1.3;text-align:right;white-space:nowrap}
@@ -133,7 +136,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 .sp.none{background:var(--due-soft);color:var(--due)}
 .sp.lay{background:var(--lay);color:var(--lay-ink)}
 .dvs{font-size:.76rem;font-weight:800;padding:3px 10px;border-radius:999px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
-.dvs.ok{background:var(--ok-soft);color:var(--ok)}
+.dvs.ok{background:var(--brand);color:var(--brand-fg)}   /* nền đậm màu quán: khác chip shipper (.sp nền nhạt), giống cột trái thẻ đã giao */
 .c-meta .pill{font-size:.76rem;padding:3px 10px}
 .ofoot{display:flex;justify-content:space-between;gap:8px;padding:10px 12px;font-weight:800;background:var(--surface-2);font-variant-numeric:tabular-nums}
 /* Phân shipper: mỗi đơn một hàng — tick · (giờ khách / tiền) · ô chọn shipper */
@@ -145,7 +148,9 @@ button,input,textarea,select{font:inherit;color:inherit}
 .arow{display:grid;grid-template-columns:34px minmax(0,1fr) 112px;gap:6px;align-items:center;padding:9px 10px;border-bottom:1px solid var(--line);min-height:64px}
 .arow:last-child{border-bottom:0}
 .arow.sel{background:var(--brand-soft)}
-.arow.done .a-info{opacity:.65}
+.arow.done{box-shadow:inset 4px 0 0 var(--brand)}
+.arow.done .a-time{color:var(--brand)}
+.a-dv{display:inline-block;font-size:.72rem;font-weight:800;padding:1px 8px;border-radius:999px;background:var(--brand);color:var(--brand-fg);margin-right:6px;vertical-align:1px}
 .chk{display:grid;place-items:center;width:34px;height:44px;cursor:pointer}
 .chk input{width:22px;height:22px;accent-color:var(--brand)}
 .a-info{min-width:0;cursor:pointer}
@@ -460,3 +465,17 @@ input[type=time]::-webkit-date-and-time-value,input[type=date]::-webkit-date-and
 .namesell{display:flex;gap:12px;align-items:flex-end}
 .namesell .field{flex:1;min-width:0}
 .namesell .sell{flex:none;white-space:nowrap;min-height:44px;padding:0 2px}
+
+/* Đơn đã giao (v7.1): giữ nguyên chỗ, không làm mờ; tô theo MÀU QUÁN (đổi màu giao diện là đổi theo): viền màu quán,
+   cột trái nền đậm màu quán + dấu ✓ (.ticket.done .stub ở trên); nút "✓ Đã giao" dùng .sbtn.on (màu quán) */
+
+/* Nhập đơn từ comment: chọn món của bài đăng (v7.2) */
+.cm-post{display:flex;flex-wrap:wrap;gap:6px}
+.cm-post .chip{white-space:normal;text-align:left;line-height:1.25}
+.cm-post .chip[aria-pressed="true"] span{opacity:.85}
+.cm-pq{margin-bottom:8px}
+.cm-cnt{font-size:.78rem;font-weight:800;color:var(--brand);background:var(--brand-soft);border-radius:999px;padding:1px 8px;margin-left:4px;vertical-align:1px;text-transform:none;letter-spacing:0}
+.cm-sel{margin-bottom:10px}
+.cm-post .chip.on b{margin-left:6px;font-weight:800;opacity:.9}
+.cm-lab{margin:2px 0 6px;font-size:.78rem;font-weight:800;color:var(--muted)}
+#cm_post .linkbtn{margin-top:8px}

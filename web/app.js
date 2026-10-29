@@ -51,6 +51,7 @@ const IC={
   staff:'<circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c.7-3.6 3.3-5.6 6.5-5.6s5.8 2 6.5 5.6"/>',
   key:'<circle cx="8" cy="15" r="3.5"/><path d="M10.5 12.5 19 4M16 7l2.5 2.5M14 9l2 2"/>',
   chev:'<path d="m10 7 5 5-5 5"/>',
+  check:'<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   palette:'<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.8 2-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7.2" r="1"/><circle cx="14.5" cy="7.2" r="1"/>',
   paste:'<path d="M9 4h6v3H9z"/><path d="M15 5.5h2a1 1 0 0 1 1 1V10M9 5.5H7a1 1 0 0 0-1 1V19a1 1 0 0 0 1 1h4"/><rect x="12" y="11" width="8" height="10" rx="1.5"/><path d="M14.5 15h3M14.5 18h3"/>'
 };
@@ -139,7 +140,7 @@ const ACT_PERM={
   day:null,today:null,   // shipper cũng chuyển ngày được, nhưng chỉ trong 5 ngày (xem shipRange)
   layout:'order.assign','ship-filter':'order.assign','sel-unassigned':'order.assign','sel-all':'order.assign','sel-clear':'order.assign','bulk-assign':'order.assign',
   'new-order':'order.create','order-for':'order.create','save-order':'*order',
-  'cmt-open':'order.create','cmt-read':'order.create','cmt-save':'order.create','cmt-back':'order.create','cmt-rmimg':'order.create','cmt-mode':'order.create','cmt-pick':'order.create','cmt-qty':'order.create','cmt-rmitem':'order.create','cmt-additem':'order.create',
+  'cmt-open':'order.create','cmt-read':'order.create','cmt-post':'order.create','cmt-pall':'order.create','cmt-save':'order.create','cmt-back':'order.create','cmt-rmimg':'order.create','cmt-mode':'order.create','cmt-pick':'order.create','cmt-qty':'order.create','cmt-rmitem':'order.create','cmt-additem':'order.create',
   'edit-order':'order.edit',pay:'order.pay',deliver:'order.pay',
   'print-one':'order.print','print-all':'order.print','save-bill':'order.print','print-now':'order.print',
   'open-order':'report.view',preset:'report.view',topby:'report.view',
@@ -202,6 +203,16 @@ function noteOk(){lockSet({n:0,until:0})}
 
 /* ---------- storage (Supabase) ---------- */
 const CFG=window.LYLY_CONFIG||{};
+// Phiên đăng nhập lưu trên máy (khoá lyly_auth_v1) mà thuộc dự án Supabase KHÁC (vd: app Lyly Food cũ cùng tên miền github.io)
+// thì bỏ đi trước khi mở, để hiện màn hình đăng nhập thay vì treo "Đang tải…".
+try{
+  const old=localStorage.getItem('lyly_auth_v1');
+  if(old&&CFG.supabaseUrl){
+    const tok=String((JSON.parse(old)||{}).access_token||'').split('.')[1]||'';
+    const iss=String((JSON.parse(atob(tok.replace(/-/g,'+').replace(/_/g,'/')))||{}).iss||'');
+    if(iss&&iss.indexOf(String(CFG.supabaseUrl).replace(/\/+$/,'')+'/')!==0) localStorage.removeItem('lyly_auth_v1');
+  }
+}catch(_){}
 const sb=(window.supabase&&CFG.supabaseUrl&&CFG.supabaseAnonKey&&!/YOUR[-_]/i.test(CFG.supabaseUrl+CFG.supabaseAnonKey))
   ?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:'lyly_auth_v1'}}):null;
 // Email đăng nhập "giả" = <tên đăng nhập>@<mã quán>.<đuôi>; phải trùng LOGIN_EMAIL_SUFFIX của Edge Function.
@@ -212,10 +223,12 @@ function shopCodeGet(){try{return localStorage.getItem(SHOPK)||''}catch(_){retur
 function shopCodeSet(v){try{localStorage.setItem(SHOPK,v)}catch(_){}}
 // Link riêng cho từng quán: https://.../?quan=banhmicoba điền sẵn mã quán (chỉ điền sẵn, vẫn phải nhập tên đăng nhập + mật khẩu)
 function shopCodeFromUrl(){try{const v=(new URLSearchParams(location.search).get('quan')||'').trim().toLowerCase();return /^[a-z0-9]{3,30}$/.test(v)?v:''}catch(_){return ''}}
-// enableAI:false trong config.js = ẩn tính năng nhập đơn từ comment Facebook (AI); chưa cấu hình thì mặc định bật
+// Nhập đơn từ comment Facebook (AI): enableAI:false trong config.js = tắt hẳn cho mọi quán (công tắc tổng);
+// bật thì quán nào được nhà cung cấp bật riêng (cột shops.ai_enabled, chủ quán không tự đổi được) mới thấy nút.
 const AI_ON=CFG.enableAI!==false;
+const aiOn=()=>AI_ON&&!!(shopRow()&&shopRow().aiEnabled===true);
 // Số phiên bản hiện ở cuối Cài đặt: để biết quán/máy nào đang chạy bản nào. Đổi mỗi lần đưa bản mới lên cho khách (dạng năm.tháng.ngày).
-const APP_VERSION='2026.10.27';
+const APP_VERSION='2026.10.29';
 const shopCodeDefault=()=>shopCodeFromUrl()||shopCodeGet()||CFG.defaultShop||'';
 S.db=!!sb;
 const TBL={staff:'profiles',menu:'menu_items',groups:'menu_groups',customers:'customers',orders:'orders',settings:'settings',shops:'shops',costs:'menu_costs'};
@@ -226,7 +239,7 @@ const FIELDS={
   groups:[['name','name'],['order','sort_order'],['sample','sample'],['createdAt','created_at','ts']],
   costs:[['cost','cost'],['updatedAt','updated_at','ts']],   // giá vốn: id = id của món; chỉ người có quyền cost.view đọc/ghi được (máy chủ chặn)
   customers:[['name','name'],['phone','phone'],['address','address'],['note','note'],['sample','sample'],['imported','imported'],['createdAt','created_at','ts']],
-  shops:[['name','name'],['slug','slug','ro'],['status','status','ro'],['trialEndsAt','trial_ends_at','ts'],['paidUntil','paid_until','ts'],['contactPhone','contact_phone'],['contactEmail','contact_email'],['createdAt','created_at','ts']],
+  shops:[['name','name'],['slug','slug','ro'],['status','status','ro'],['trialEndsAt','trial_ends_at','ts'],['paidUntil','paid_until','ts'],['contactPhone','contact_phone'],['contactEmail','contact_email'],['createdAt','created_at','ts'],['aiEnabled','ai_enabled','ro']],
   orders:[['date','date'],['time','time'],['mode','mode'],['customerId','customer_id'],['name','name'],['phone','phone'],['address','address'],['items','items'],['total','total'],['note','note'],['payment','payment'],['noCollect','no_collect'],['delivered','delivered'],['shipperId','shipper_id'],['shipperName','shipper_name'],['sample','sample','ro'],['createdAt','created_at','ts'],['updatedAt','updated_at','ts'],['createdBy','created_by','ro'],['createdById','created_by_id','ro'],['updatedBy','updated_by','ro']]
 };
 function toRow(col,doc){
@@ -499,7 +512,7 @@ function viewOrders(){
     <div><small>Đã thu</small><b>${vnd(st.cash+st.ck)}</b><em>TM ${vnd(st.cash)} · CK ${vnd(st.ck)}</em></div>
     <div class="due"><small>Chưa thu</small><b>${vnd(st.due)}</b><em>${st.dueN} đơn</em></div>
   </div>`:`<div class="sumline"><span><b>${list.length}</b> đơn</span><span>Đã thu <b>${vnd(st.cash+st.ck)}</b></span><span class="due">Chưa thu <b>${vnd(st.due)}</b></span></div>`;
-  const cmtRow=(AI_ON&&!sh&&can('order.create'))?`<button class="cmtbtn" data-act="cmt-open">${icon('paste')}<span><b>Nhập đơn từ comment Facebook</b><small>Dán chữ hoặc ảnh chụp, xem lại rồi tạo hàng loạt</small></span></button>`:'';
+  const cmtRow=(aiOn()&&!sh&&can('order.create'))?`<button class="cmtbtn" data-act="cmt-open">${icon('paste')}<span><b>Nhập đơn từ comment Facebook</b><small>Dán chữ hoặc ảnh chụp, xem lại rồi tạo hàng loạt</small></span></button>`:'';
   let h=`${dayBar}
   ${summary}
   ${cmtRow}
@@ -512,6 +525,7 @@ function viewOrders(){
   S._shown=shown.map(o=>o.id);
   const bar=`<div class="printall"><span class="hint">${shown.length} đơn đang hiện</span>${!can('order.print')?'':`<button class="sbtn prt" data-act="print-all">${icon('print')}In tất cả ${shown.length} bill</button>`}</div>`;
   if(lay==='table') return h+bar+tableView(shown);
+  // Đơn đã giao giữ nguyên chỗ (theo giờ), không làm mờ: thẻ đổi sang màu xanh, cột trái có dấu ✓ "Đã giao"
   return h+bar+`<div class="list">${shown.map(o=>ticket(o,no[o.id])).join('')}</div>`;
 }
 
@@ -544,7 +558,7 @@ function arow(o){
     <label class="chk"><input type="checkbox" data-sel="${o.id}" ${on?'checked':''} aria-label="Chọn đơn ${esc(o.name||'khách lẻ')}"></label>
     <div class="a-info" ${editAttr(o)}>
       <div class="a-top"><b class="a-time num">${o.time?esc(o.time):'--:--'}</b><b class="a-name">${esc(o.name||'Khách lẻ')}</b></div>
-      <div class="a-sub"><b class="num">${vnd(o.total)}</b>${o.address?' · '+esc(o.address):''}</div>
+      <div class="a-sub">${o.delivered?`<span class="a-dv">✓ Đã ${o.mode==='lay'?'lấy':'giao'}</span>`:''}<b class="num">${vnd(o.total)}</b>${o.address?' · '+esc(o.address):''}</div>
     </div>
     <select class="a-sel ${cur?'':'none'}" data-ship-for="${o.id}" aria-label="Shipper cho đơn ${esc(o.name||'khách lẻ')}">${shipOpts(cur,'Chưa gán')}</select>
   </div>`;
@@ -580,7 +594,9 @@ function ticket(o,n){
   const shn=shipperLabel(o);
   const shipLine=(!restricted()&&!lay)?`<div class="shp ${shn?'':'none'}">${shn?'Shipper: '+esc(shn):'Chưa gán shipper'}</div>`:'';
   return `<article class="ticket ${o.delivered?'done':''} ${lay?'lay':''} ${ro?'ro':''}" ${ro?'':`data-act="edit-order" data-id="${o.id}" tabindex="0"`}>
-    <div class="stub">${o.time?'<div class="pre">trước</div>':''}<div class="t ${o.time?'':'none'}">${o.time?esc(o.time):'--:--'}</div><div class="m">${lay?'Ghé lấy':'Giao'}</div><div class="no">#${n}</div></div>
+    <div class="stub">${o.delivered
+      ?`<span class="sck">${icon('check')}</span><div class="m">${lay?'Đã lấy':'Đã giao'}</div>${o.time?`<div class="ht">hẹn ${esc(o.time)}</div>`:''}`
+      :`${o.time?'<div class="pre">trước</div>':''}<div class="t ${o.time?'':'none'}">${o.time?esc(o.time):'--:--'}</div><div class="m">${lay?'Ghé lấy':'Giao'}</div>`}<div class="no">#${n}</div></div>
     <div class="tbody">
       <div class="row1"><div class="who"><h3>${esc(o.name||'Khách lẻ')}</h3>${o.phone?`<span class="ph">${esc(o.phone)}<button class="copy" data-act="copy" data-v="${esc(o.phone)}">copy</button></span>`:''}</div><span class="pill pay-${payCls(o)}">${payLabel(o)}</span></div>
       ${o.address&&!lay?`<div class="addr">${esc(o.address)}</div>`:''}
@@ -878,7 +894,7 @@ async function saveOrder(btn){
 }
 
 /* ---------- nhập đơn từ comment Facebook: AI đọc → đơn nháp → người xem lại, sửa → tạo ---------- */
-const CM_MAX_IMG=4;
+const CM_MAX_IMG=20, CM_CHUNK=4;   // tối đa 20 ảnh mỗi lần nhập; gửi AI từng đợt 4 ảnh
 // Bỏ các dòng chữ giao diện Facebook khi dán (Thích, Trả lời, "12 giờ"…) cho đỡ nhiễu
 const FB_UI=/^(thích|trả lời|chia sẻ|tác giả|theo dõi|đã chỉnh sửa|hàng đầu|phù hợp nhất|tất cả bình luận|viết bình luận.*|xem (thêm )?\d* ?(câu trả lời|phản hồi|bình luận).*)$/i;
 const FB_TIME=/^\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)$/i;
@@ -930,19 +946,64 @@ function cmMenuOpts(sel){
   const rest=act.filter(m=>!used.has(m.id)); if(rest.length) h+=`<optgroup label="Khác">${rest.map(opt).join('')}</optgroup>`;
   return h;
 }
-function cmtOpen(){CM={step:'in',text:'',imgs:[],date:tomorrowStr(),busy:false,err:'',drafts:[],ignored:[]};renderCmt()}
-function cmSync(){ if(!CM||CM.step!=='in')return; const t=$('#cm_text'),d=$('#cm_date'); if(t) CM.text=t.value; if(d&&d.value) CM.date=d.value }
+// Món của bài đăng: comment kiểu "Chị A 1p" không ghi tên món → AI hiểu là món của bài. Nhớ theo máy, trong ngày, theo quán.
+const CMPK='dk_cmt_post_v1', CM_FEW=12;
+// Lưu theo máy, theo quán: món đã chọn + ghi chú (chỉ dùng lại trong ngày) và danh sách món hay chọn gần đây (giữ qua các ngày)
+function cmPostStore(){try{return JSON.parse(localStorage.getItem(CMPK)||'{}')||{}}catch(_){return {}}}
+function cmPostGet(){const v=cmPostStore()[shopSlug()]||{}; return {today:v.day===dstr(new Date())?v:null, recent:Array.isArray(v.recent)?v.recent:[]}}
+function cmPostSet(){try{const m=cmPostStore(), old=(m[shopSlug()]||{}).recent||[];
+  m[shopSlug()]={day:dstr(new Date()),ids:CM.post,note:CM.pnote,recent:[...new Set([...CM.post,...old])].slice(0,16)}; localStorage.setItem(CMPK,JSON.stringify(m))}catch(_){}}
+function cmPostMenu(){
+  const act=S.menu.filter(m=>m.active!==false).sort(byName), used=new Set(), out=[];
+  for(const g of groupsSorted()){const ms=act.filter(m=>m.groupId===g.id); ms.forEach(m=>{used.add(m.id);out.push(m)})}
+  return out.concat(act.filter(m=>!used.has(m.id)));
+}
+function cmtOpen(){
+  const pv=cmPostGet(), ok=new Set(S.menu.filter(m=>m.active!==false).map(m=>m.id));
+  CM={step:'in',text:'',imgs:[],date:tomorrowStr(),busy:false,err:'',drafts:[],ignored:[],prog:null,resume:false,
+    post:pv.today?(pv.today.ids||[]).filter(id=>ok.has(id)):[],pnote:pv.today?String(pv.today.note||''):'',pq:'',pall:false,recent:pv.recent.filter(id=>ok.has(id))};
+  renderCmt();
+}
+const cmChip=(m,on)=>`<button type="button" class="chip${on?' on':''}" data-act="cmt-post" data-id="${m.id}" aria-pressed="${on}" ${CM.busy?'disabled':''}>${on?'✓ ':''}${esc(m.name)}<span>${vnd(m.price)}</span>${on?'<b aria-hidden="true">×</b>':''}</button>`;
+// Menu ít (≤12): hiện hết để bấm. Menu dài (vd 100 món, hôm nay bán 3): món đã chọn ở trên; gõ tìm → hiện món khớp;
+// chưa gõ → hiện món hay chọn gần đây + nút "Xem tất cả".
+function cmPostChips(){
+  const all=cmPostMenu(), sel=new Set(CM.post), byId=new Map(all.map(m=>[m.id,m]));
+  if(all.length<=CM_FEW) return `<div class="cm-post">${all.map(m=>cmChip(m,sel.has(m.id))).join('')}</div>`;
+  const q=norm(CM.pq||'').trim();
+  const picked=CM.post.map(id=>byId.get(id)).filter(Boolean);
+  let h=picked.length?`<div class="cm-post cm-sel">${picked.map(m=>cmChip(m,true)).join('')}</div>`:'';
+  if(q){
+    const hit=all.filter(m=>!sel.has(m.id)&&norm(m.name).includes(q));
+    h+=hit.length?`<div class="cm-post">${hit.slice(0,24).map(m=>cmChip(m,false)).join('')}</div>${hit.length>24?`<p class="hint">…và ${hit.length-24} ${W.m} khác, gõ thêm chữ để lọc.</p>`:''}`
+      :`<p class="hint">Không có ${W.m} nào khớp "${esc(CM.pq)}".</p>`;
+  } else if(CM.pall){
+    h+=`<div class="cm-post">${all.filter(m=>!sel.has(m.id)).map(m=>cmChip(m,false)).join('')}</div><button type="button" class="linkbtn" data-act="cmt-pall">Thu gọn danh sách</button>`;
+  } else {
+    const rec=CM.recent.filter(id=>!sel.has(id)).map(id=>byId.get(id)).filter(Boolean).slice(0,8);
+    if(rec.length) h+=`<p class="cm-lab">Hay chọn gần đây</p><div class="cm-post">${rec.map(m=>cmChip(m,false)).join('')}</div>`;
+    h+=`<button type="button" class="linkbtn" data-act="cmt-pall">Xem tất cả ${all.length} ${W.m}</button>`;
+  }
+  return h;
+}
+function cmSync(){ if(!CM||CM.step!=='in')return; const t=$('#cm_text'),d=$('#cm_date'),n=$('#cm_pnote'); if(t) CM.text=t.value; if(d&&d.value) CM.date=d.value; if(n) CM.pnote=n.value }
 function renderCmt(){
   if(!CM) return;
   const sb=document.querySelector('#sheetBox .sh-body'), top=sb?sb.scrollTop:0;
   if(CM.step==='in'){
     openSheet(`${head('Nhập đơn từ comment','Dán chữ hoặc ảnh chụp comment Facebook')}
     <div class="sh-body">
+      <section class="fs"><h4>Bài đăng này bán ${W.m} gì?${CM.post.length?` <span class="cm-cnt">đã chọn ${CM.post.length}</span>`:''}</h4>
+        <p class="hint">Chọn ${W.m} của bài đăng. Comment chỉ ghi "1p", "2 phần", "1 M"… thì AI hiểu là ${W.m} này. Không chọn thì AI đoán theo chữ trong comment.</p>
+        ${cmPostMenu().length>CM_FEW?`<input type="search" id="cm_pq" class="cm-pq" placeholder="Gõ tên ${W.m} để tìm, vd: hai san" value="${esc(CM.pq)}" autocomplete="off" ${CM.busy?'disabled':''}>`:''}
+        <div id="cm_post">${cmPostChips()}</div>
+        <div class="field"><label for="cm_pnote">Ghi thêm cho AI (không bắt buộc)</label><input type="text" id="cm_pnote" maxlength="500" value="${esc(CM.pnote)}" placeholder="VD: không ghi size thì là size M" ${CM.busy?'disabled':''}></div>
+      </section>
       <section class="fs"><h4>Comment</h4>
-        <textarea id="cm_text" class="cm-text" placeholder="Dán comment vào đây.&#10;VD: Chị Như : 4p đb L ( Sóc Trăng )&#10;Chị Yến : mai 6h ship 2p M súp gà thanh cua, ko tiêu" ${CM.busy?'disabled':''}>${esc(CM.text)}</textarea>
+        <textarea id="cm_text" class="cm-text" placeholder="Dán comment vào đây.&#10;VD: Chị Như : 2p ( Sóc Trăng )&#10;Chị Yến : mai 6h ship 1p, ko tiêu" ${CM.busy?'disabled':''}>${esc(CM.text)}</textarea>
         <div class="cm-imgs">${CM.imgs.map((im,i)=>`<div class="cm-th"><img src="${im.url}" alt="Ảnh ${i+1}"><button type="button" data-act="cmt-rmimg" data-i="${i}" aria-label="Bỏ ảnh">×</button></div>`).join('')}
           ${CM.imgs.length<CM_MAX_IMG?`<label class="cm-add" for="cm_file">+ Thêm ảnh chụp<input type="file" id="cm_file" class="vh" accept="image/*" multiple></label>`:''}</div>
-        <span class="hint">Có thể chụp màn hình comment rồi dán ảnh vào (Ctrl+V trên máy tính). Tối đa ${CM_MAX_IMG} ảnh mỗi lần.</span>
+        <span class="hint">Chụp màn hình comment rồi thêm ảnh (máy tính: Ctrl+V để dán). Tối đa ${CM_MAX_IMG} ảnh mỗi lần; chụp cuộn chồng lên nhau cũng được, đơn bị trùng sẽ tự bỏ tick.</span>
       </section>
       <section class="fs"><h4>Ngày giao</h4>
         <div class="field"><label for="cm_date">Dùng ngày này cho đơn không ghi ngày</label><input type="date" id="cm_date" value="${esc(CM.date)}"></div>
@@ -950,7 +1011,7 @@ function renderCmt(){
       ${CM.err?`<div class="banner warn" role="alert">${esc(CM.err)}</div>`:''}
       <p class="hint">AI chỉ tạo <b>đơn nháp</b>. Anh/chị xem lại và sửa từng đơn trước khi bấm tạo — chưa có đơn nào được lưu ở bước này.</p>
     </div>
-    <div class="sh-foot"><span></span><button class="btn primary" data-act="cmt-read" ${CM.busy?'disabled':''}>${CM.busy?'Đang đọc comment…':'Đọc comment'}</button></div>`);
+    <div class="sh-foot"><span></span><button class="btn primary" data-act="cmt-read" ${CM.busy?'disabled':''}>${CM.busy?(CM.prog?`Đang đọc… đợt ${CM.prog.k}/${CM.prog.n}`:'Đang đọc comment…'):'Đọc comment'}</button></div>`);
     return;
   }
   const todo=CM.drafts.filter(d=>d.on&&!d.done).length;
@@ -1062,21 +1123,52 @@ function cmtPrep(file){
     rd.readAsDataURL(file);
   });
 }
+// Đánh dấu đơn có thể trùng (ảnh chụp cuộn màn hình chồng lên nhau): cùng nguyên văn comment, hoặc cùng tên khách + cùng món/số lượng.
+// Không xoá: bỏ tick và ghi chú để người dùng tự quyết.
+function cmMarkDup(list){
+  const seen=new Map();
+  list.forEach((d,i)=>{
+    const sig=d.items.map(it=>(it.mid||norm(it.text))+'x'+it.qty).sort().join(',');
+    const keys=[norm(d.raw).replace(/\s+/g,' ').trim(), norm(d.name).trim()+'|'+sig].filter(k=>k.length>3);
+    const hit=keys.map(k=>seen.get(k)).find(x=>x!==undefined);
+    if(hit!==undefined&&!d.done){ d.on=false; if(!d.issues.some(x=>/trùng với đơn/.test(x))) d.issues=['Có thể trùng với đơn '+(hit+1)+' (ảnh chụp chồng nhau), đã bỏ tick',...d.issues] }
+    else keys.forEach(k=>{ if(!seen.has(k)) seen.set(k,i) });
+  });
+  return list;
+}
+// Đọc theo từng đợt CM_CHUNK ảnh (mỗi đợt một lần gọi AI) để không quá thời gian của máy chủ; chữ dán gửi kèm đợt đầu.
+// Một đợt lỗi: giữ các đơn đã đọc được, các ảnh chưa đọc ở lại để bấm "‹ Đọc lại" đọc tiếp (đơn mới được nối thêm).
 async function cmtRead(btn){
   cmSync();
   const text=cleanFb(CM.text);
   if(!text&&!CM.imgs.length){CM.err='Dán chữ hoặc thêm ảnh chụp trước nhé.';renderCmt();return}
-  CM.busy=true; CM.err=''; renderCmt();
-  try{
-    const r=await fnCall('parse-orders',{text,images:CM.imgs.map(i=>({media_type:i.media_type,data:i.data}))});
-    if(!CM) return;
-    CM.busy=false; CM.step='review'; CM.ignored=r.ignored||[]; CM.drafts=(r.orders||[]).map(cmDraft);
-    if(!CM.drafts.length) CM.err='Không đọc được đơn nào trong nội dung này.';
-    renderCmt();
-  }catch(e){
-    if(!CM) return;
-    CM.busy=false; CM.err=(e&&e.code==='app'&&e.message)||'Chưa đọc được, thử lại nhé.'; console.error(e); renderCmt();
+  const chunks=[]; for(let i=0;i<CM.imgs.length;i+=CM_CHUNK) chunks.push(CM.imgs.slice(i,i+CM_CHUNK));
+  if(!chunks.length) chunks.push([]);
+  cmPostSet();
+  CM.busy=true; CM.err='';
+  const got=[], ign=[]; let failAt=-1, msg='';
+  for(let k=0;k<chunks.length;k++){
+    CM.prog=chunks.length>1?{k:k+1,n:chunks.length}:null; renderCmt();
+    try{
+      const r=await fnCall('parse-orders',{text:k===0?text:'',images:chunks[k].map(i=>({media_type:i.media_type,data:i.data})),post_items:CM.post,post_note:String(CM.pnote||'').trim()});
+      if(!CM) return;
+      got.push(...(r.orders||[])); ign.push(...(r.ignored||[]));
+    }catch(e){
+      if(!CM) return;
+      failAt=k; msg=(e&&e.code==='app'&&e.message)||'Chưa đọc được, thử lại nhé.'; console.error(e); break;
+    }
   }
+  CM.busy=false; CM.prog=null;
+  if(failAt===0){ CM.err=msg; renderCmt(); return }   // chưa đọc được gì: ở lại màn hình nhập như cũ
+  const fresh=got.map(cmDraft);
+  CM.drafts=cmMarkDup(CM.resume?[...CM.drafts,...fresh]:fresh); CM.ignored=CM.resume?[...CM.ignored,...ign]:ign;
+  CM.step='review'; CM.resume=false; CM.err='';
+  if(failAt>0){
+    const doneImgs=failAt*CM_CHUNK, left=CM.imgs.length-doneImgs;
+    CM.imgs=CM.imgs.slice(doneImgs); CM.text=''; CM.resume=true;
+    CM.err=`Đã đọc ${doneImgs} ảnh đầu. Còn ${left} ảnh chưa đọc được (${msg}). Bấm "‹ Đọc lại" để đọc tiếp các ảnh đó, đơn đọc được sẽ nối thêm vào đây.`;
+  } else if(!CM.drafts.length) CM.err='Không đọc được đơn nào trong nội dung này.';
+  renderCmt();
 }
 async function cmtSave(btn){
   if(!can('order.create')){toast(NOPERM);return}
@@ -1828,10 +1920,12 @@ document.addEventListener('click',async e=>{
     case 'day': {S._dayTouched=true; const d=dparse(S.date); d.setDate(d.getDate()+(+el.dataset.d)); S.date=restricted()?shipClamp(dstr(d)):dstr(d); S.sel.clear(); subOrders(); render(); break}
     case 'today': S._dayTouched=true; S.date=dstr(new Date()); S.sel.clear(); subOrders(); render(); break;
     case 'new-order': orderForm(null); break;
-    case 'cmt-open': if(AI_ON) cmtOpen(); break;
+    case 'cmt-open': if(aiOn()) cmtOpen(); break;
     case 'cmt-read': cmtRead(el); break;
     case 'cmt-save': cmtSave(el); break;
-    case 'cmt-back': if(CM){CM.step='in';CM.err='';renderCmt()} break;
+    case 'cmt-back': if(CM){CM.step='in';CM.err=CM.resume?'Còn '+CM.imgs.length+' ảnh chưa đọc. Bấm "Đọc comment" để đọc tiếp; đơn đọc được sẽ nối thêm vào các đơn nháp trước.':'';renderCmt()} break;
+    case 'cmt-post': if(CM&&CM.step==='in'&&!CM.busy){cmSync(); const i=CM.post.indexOf(id); if(i>=0) CM.post.splice(i,1); else if(CM.post.length<20){CM.post.push(id); CM.pq=''} else toast('Chọn tối đa 20 '+W.m+'.'); renderCmt()} break;
+    case 'cmt-pall': if(CM&&CM.step==='in'){cmSync(); CM.pall=!CM.pall; renderCmt()} break;
     case 'cmt-rmimg': if(CM){cmSync();CM.imgs.splice(+el.dataset.i,1);CM.err='';renderCmt()} break;
     case 'cmt-pick': cmPick(+el.dataset.i,el.dataset.id); break;
     case 'cmt-mode': {const d=CM&&CM.drafts[+el.dataset.i]; if(d&&!d.done){d.mode=el.dataset.v; renderCmt()} break}
@@ -1923,6 +2017,8 @@ document.addEventListener('input',e=>{
   const t=e.target;
   if(t.id==='q'){S.q=t.value;S._qfocus=true;render();return}
   if(CM&&t.id==='cm_text'){CM.text=t.value;return}
+  if(CM&&t.id==='cm_pnote'){CM.pnote=t.value;return}
+  if(CM&&t.id==='cm_pq'){CM.pq=t.value; const box=$('#cm_post'); if(box) box.innerHTML=cmPostChips(); return}
   if(CM&&t.dataset&&t.dataset.cm!==undefined){ if(can('order.create')) cmField(t,'input'); return}
   if(!F)return;
   if(t.classList.contains('inote')){const it=F.itemMap[t.dataset.mid]; if(it) it.note=t.value; return}
