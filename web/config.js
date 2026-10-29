@@ -17,5 +17,5 @@ window.LYLY_CONFIG = {
   // false = ẩn nút "Tạo quán mới": chỉ nhà cung cấp tạo quán bằng lệnh (scripts/shop.mjs create)
   allowSignup: false,
   // false = ẩn nút "Nhập đơn từ comment Facebook" (AI)
-  enableAI: false
+  enableAI: true
 };
