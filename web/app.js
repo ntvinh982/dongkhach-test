@@ -36,7 +36,7 @@ const tw=s=>isRetail()?String(s).replace(/(?<![\p{L}\p{N}])([Mm])ón(?![\p{L}\p{
 const UNITS={food:['Phần','Ly','Hộp','Chai','Lon','Cái','Kg'],retail:['Cái','Hộp','Chai','Tuýp','Lọ','Bộ','Gói','Kg']};
 const ROLE={admin:'Quản lý',cashier:'Thu ngân',shipper:'Shipper'};
 const ROLE_HINT={admin:'Toàn quyền: báo cáo, nhân viên và phân quyền, thông tin cửa hàng, xoá dữ liệu.',cashier:'Mặc định: tạo/sửa đơn, thu tiền, in bill, gán shipper, quản lý khách và món (không xoá, không xem báo cáo). Có thể chỉnh lại bên dưới.',shipper:'Mặc định: chỉ xem các đơn giao được gán cho tài khoản này trong 5 ngày (3 ngày trước, hôm nay, ngày mai), thu tiền và đánh dấu đã giao chỉ ở đơn hôm nay. Có thể cấp thêm quyền bên dưới.'};
-const roleOf=s=>!s?'':(s.role==='staff'?'cashier':s.role); // tài khoản cũ "Nhân viên" = Thu ngân
+const roleOf=s=>s?s.role:'';
 const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/g,'d');
 const digits=s=>String(s||'').replace(/\D/g,'');
 const byName=(a,b)=>String(a.name||'').localeCompare(String(b.name||''),'vi');
@@ -168,7 +168,6 @@ const LKEY='lyly_layout_v1'; let memLayout='cards';
 function layoutGet(){let v; try{v=localStorage.getItem(LKEY)}catch(_){v=memLayout} return v==='table'||v==='assign'?v:'cards'}
 function layoutSet(v){memLayout=v;try{localStorage.setItem(LKEY,v)}catch(_){}}
 S.layout=layoutGet(); S.sel=new Set(); S.shipFilter='all'; S.bulkShip='';
-const itemsText=o=>(o.items||[]).map(it=>`${it.qty}× ${esc(it.name)}`).join(', ');
 const payShort=o=>payOf(o)==='unpaid'?(noCol(o)?'Trả sau':'Chưa thu'):(payOf(o)==='cash'?'Đã thu · TM':'Đã thu · CK');
 async function assignShipper(ids,shipperId){
   if(!canAssign()){toast('Bạn không có quyền gán shipper.');return false}
@@ -223,6 +222,8 @@ const sb=(window.supabase&&CFG.supabaseUrl&&CFG.supabaseAnonKey&&!/YOUR[-_]/i.te
 // Email đăng nhập "giả" = <tên đăng nhập>@<mã quán>.<đuôi>; phải trùng LOGIN_EMAIL_SUFFIX của Edge Function.
 const EMAIL_SUFFIX=CFG.emailSuffix||'app';
 const emailOf=(u,code)=>u+'@'+String(code||'').toLowerCase()+'.'+EMAIL_SUFFIX;
+// ngược lại: email đăng nhập → mã quán ('' nếu không đúng dạng <tên>@<mã quán>.<đuôi>)
+function shopOfEmail(e){const s=String(e||'').toLowerCase(), i=s.lastIndexOf('@'), sf='.'+String(EMAIL_SUFFIX).toLowerCase(); return i>0&&s.endsWith(sf)?s.slice(i+1,s.length-sf.length):''}
 const SHOPK='lyly_shop_code_v1';
 function shopCodeGet(){try{return localStorage.getItem(SHOPK)||''}catch(_){return ''}}
 function shopCodeSet(v){try{localStorage.setItem(SHOPK,v)}catch(_){}}
@@ -233,7 +234,7 @@ function shopCodeFromUrl(){try{const v=(new URLSearchParams(location.search).get
 const AI_ON=CFG.enableAI!==false;
 const aiOn=()=>AI_ON&&!!(shopRow()&&shopRow().aiEnabled===true);
 // Số phiên bản hiện ở cuối Cài đặt: để biết quán/máy nào đang chạy bản nào. Đổi mỗi lần đưa bản mới lên cho khách (dạng năm.tháng.ngày).
-const APP_VERSION='2026.10.30.1';
+const APP_VERSION='2026.10.30.3';
 const shopCodeDefault=()=>shopCodeFromUrl()||shopCodeGet()||CFG.defaultShop||'';
 S.db=!!sb;
 const TBL={staff:'profiles',menu:'menu_items',groups:'menu_groups',customers:'customers',orders:'orders',settings:'settings',shops:'shops',costs:'menu_costs'};
@@ -252,8 +253,15 @@ function toRow(col,doc){
   for(const [k,c,f] of FIELDS[col]){ if(f||doc[k]===undefined) continue; row[c]=(c==='shipper_id')?(doc[k]||null):doc[k] }
   return row;
 }
+// Mã dữ liệu do app tạo luôn là chữ + số (newId). Dòng có mã lạ (ai đó ghi thẳng lên máy chủ, bỏ qua app) bị bỏ qua,
+// món trong đơn được chuẩn hoá về đúng kiểu: mã và số lượng chèn thẳng vào giao diện nên không để lọt đoạn mã HTML nào.
+const SAFE_ID=/^[A-Za-z0-9_-]{1,64}$/, TEXT_ID={menu:1,groups:1,customers:1,orders:1,costs:1};
+const safeId=v=>typeof v==='string'&&SAFE_ID.test(v)?v:'';
+const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
+const cleanItems=a=>(Array.isArray(a)?a:[]).filter(it=>it&&typeof it==='object').map(it=>({menuId:safeId(it.menuId),name:String(it.name??''),price:num(it.price),qty:num(it.qty),note:String(it.note??'')}));
 function fromRow(col,r){
   if(col==='settings') return Object.assign({id:r.key},r.data||{});
+  if(TEXT_ID[col]&&!safeId(r.id)){console.warn('Bỏ qua dòng có mã không hợp lệ',col);return null}
   const d={id:r.id};
   for(const [k,c,f] of FIELDS[col]){
     let v=r[c];
@@ -261,6 +269,8 @@ function fromRow(col,r){
     else if(v===null||v===undefined) v=(c==='theme'||c==='updated_by')?undefined:'';
     d[k]=v;
   }
+  if(col==='orders'){d.items=cleanItems(d.items); d.customerId=safeId(d.customerId); d.total=num(d.total)}
+  if(col==='menu'){d.groupId=safeId(d.groupId); d.price=num(d.price)}
   return d;
 }
 const known=(col,id)=>col==='orders'?(S.orders.some(o=>o.id===id)||S.rep.orders.some(o=>o.id===id)):S[col].some(x=>x.id===id);
@@ -335,7 +345,7 @@ function subOrders(){
   S.loaded.orders=false;
   if(!sb||!S.authId) return;
   const day=S.date;
-  S.unsub=watch('orders','date=eq.'+day,()=>fetchAll('orders',q=>q.eq('date',day)),rows=>{S.orders=rows.map(r=>fromRow('orders',r));S.loaded.orders=true;render()});
+  S.unsub=watch('orders','date=eq.'+day,()=>fetchAll('orders',q=>q.eq('date',day)),rows=>{S.orders=rows.map(r=>fromRow('orders',r)).filter(Boolean);S.loaded.orders=true;render()});
 }
 function subReport(){
   const r=S.rep; if(r.unsub){r.unsub();r.unsub=null}
@@ -343,13 +353,13 @@ function subReport(){
   if(!r.from||!r.to||r.from>r.to){r.loaded=true;return}
   if(!sb||!S.authId) return;
   const from=r.from,to=r.to;
-  r.unsub=watch('orders','date=gte.'+from,()=>fetchAll('orders',q=>q.gte('date',from).lte('date',to)),rows=>{r.orders=rows.map(x=>fromRow('orders',x));r.loaded=true;if(S.view==='report')render()});
+  r.unsub=watch('orders','date=gte.'+from,()=>fetchAll('orders',q=>q.gte('date',from).lte('date',to)),rows=>{r.orders=rows.map(x=>fromRow('orders',x)).filter(Boolean);r.loaded=true;if(S.view==='report')render()});
 }
 function startData(){
   stopData();
   const ws=S._w=[];
   for(const c of ['staff','shops','menu','groups','customers','settings','costs'])
-    ws.push(watch(TBL[c],null,()=>fetchAll(TBL[c]),rows=>{S[c]=rows.map(r=>fromRow(c,r));S.loaded[c]=true;afterData()}));
+    ws.push(watch(TBL[c],null,()=>fetchAll(TBL[c]),rows=>{S[c]=rows.map(r=>fromRow(c,r)).filter(Boolean);S.loaded[c]=true;afterData()}));
   subOrders();
 }
 function stopData(){
@@ -406,9 +416,9 @@ function sortedOrders(){
   return {list,no};
 }
 function statsOf(orders){
-  const r={rev:0,cash:0,ck:0,due:0,dueN:0,later:0,laterV:0,n:orders.length,paying:orders.length};
+  const r={rev:0,cash:0,ck:0,due:0,dueN:0,later:0,laterV:0,n:orders.length};
   for(const o of orders){const t=o.total||0;
-    r.rev+=t;r.paying++;
+    r.rev+=t;
     const p=payOf(o); if(p==='cash')r.cash+=t; else if(p==='transfer')r.ck+=t; else {r.due+=t;r.dueN++; if(noCol(o)){r.later++;r.laterV+=t}}}
   return r;
 }
@@ -429,7 +439,6 @@ function render(){
   urlShop();
   // vừa đăng nhập: áp giao diện đã lưu trong tài khoản (nếu có)
   if(S._themeFor!==S.me.id){S._themeFor=S.me.id; if(S.me.theme&&S.me.theme!==themeGet()) themeApply(S.me.theme)}
-  const keepScroll=authMode===null;
   authMode=null;
   if(S.view==='report'&&!can('report.view')) S.view='orders';
   if(S.view==='customers'&&!can('cust.view')) S.view='orders';
@@ -683,7 +692,7 @@ function viewReport(){
   if(!r.loaded) return h+`<div class="empty"><b>Đang tính…</b></div>`;
   const st=statsOf(r.orders);
   h+=`<div class="kpis">
-    <div class="kpi hero"><small>Doanh thu</small><b>${vnd(st.rev)}</b><span>${st.n} đơn${st.paying?' · TB '+vnd(st.rev/st.paying)+'/đơn':''}</span></div>
+    <div class="kpi hero"><small>Doanh thu</small><b>${vnd(st.rev)}</b><span>${st.n} đơn${st.n?' · TB '+vnd(st.rev/st.n)+'/đơn':''}</span></div>
     <div class="kpi"><small>Tiền mặt</small><b>${vnd(st.cash)}</b><span>đã thu</span></div>
     <div class="kpi"><small>Chuyển khoản</small><b>${vnd(st.ck)}</b><span>đã thu</span></div>
     <div class="kpi due"><small>Chưa thu</small><b>${vnd(st.due)}</b><span>${st.dueN} đơn</span></div>
@@ -847,7 +856,7 @@ function renderItems(){
   box.innerHTML=F.rows.filter(r=>r.gid===F.tab).map(r=>{const it=F.itemMap[r.menuId];const q=it?it.qty:0;return `<div class="irow ${q?'on':''}" data-mid="${r.menuId}">
       <div class="iname" data-act="qty" data-mid="${r.menuId}" data-d="1"><span>${esc(r.name)}</span><small>${vnd(r.price)}${r.unit?' / '+esc(r.unit):''}</small></div>
       <div class="stepper"><button type="button" data-act="qty" data-mid="${r.menuId}" data-d="-1" aria-label="Bớt">−</button><output class="num">${q}</output><button type="button" data-act="qty" data-mid="${r.menuId}" data-d="1" aria-label="Thêm">+</button></div>
-      <input type="text" class="inote" id="note_${r.menuId}" data-mid="${r.menuId}" placeholder="${isRetail()?'Ghi chú: màu, dung tích, quà tặng…':'Ghi chú món: ít cơm, không hành…'}" value="${esc(it?it.note:'')}" ${q?'':'hidden'}>
+      <input type="text" class="inote" id="note_${r.menuId}" data-mid="${r.menuId}" maxlength="300" placeholder="${isRetail()?'Ghi chú: màu, dung tích, quà tặng…':'Ghi chú món: ít cơm, không hành…'}" value="${esc(it?it.note:'')}" ${q?'':'hidden'}>
     </div>`}).join('');
   updTabs();
 }
@@ -1044,7 +1053,7 @@ function cmCard(d,i){
       <div class="stepper"><button type="button" data-act="cmt-qty" data-i="${i}" data-j="${j}" data-d="-1" aria-label="Bớt">−</button><output class="num">${it.qty}</output><button type="button" data-act="cmt-qty" data-i="${i}" data-j="${j}" data-d="1" aria-label="Thêm">+</button></div>
       <span class="cm-lp num">${cmMenu(it.mid)?vnd(cmMenu(it.mid).price*it.qty):''}</span>
       <button type="button" class="sbtn" data-act="cmt-rmitem" data-i="${i}" data-j="${j}" aria-label="Xoá ${W.m}">×</button>
-      <input type="text" class="cm-inote" data-cm="item-note" data-i="${i}" data-j="${j}" placeholder="Ghi chú ${W.m}" value="${esc(it.note)}">
+      <input type="text" class="cm-inote" maxlength="300" data-cm="item-note" data-i="${i}" data-j="${j}" placeholder="Ghi chú ${W.m}" value="${esc(it.note)}">
       ${it.mid?'':`<small class="cm-miss">Chưa chọn ${W.m}${it.text?' · khách viết: “'+esc(it.text)+'”':''}</small>`}
     </div>`).join('');
   return `<section class="cm-card ${d.on?'':'off'} ${d.done?'done':''}" data-card="${i}">
@@ -1699,7 +1708,7 @@ td.t{text-align:right;font-weight:700}
 @media print{.bar{display:none}}`;
 function billBody(o,n){
   const sh=shop(); const lay=o.mode==='lay'; const d=o.date||'';
-  const cAt=o.createdAt?new Date(o.createdAt):null; const note=o.note||'';
+  const note=o.note||'';
   return `<div class="bill">
   <div class="c nm">${esc(sh.name)}</div>
   ${sh.address?`<div class="c ad">${esc(sh.address)}</div>`:''}
@@ -2130,7 +2139,17 @@ render();
   if(!sb){S.booted=true;render();return}
   // Quá 12 giây vẫn "Đang tải…" (mạng yếu, phiên lưu trên máy bị kẹt): hiện nút Tải lại / Đăng nhập lại thay vì chờ mãi
   setTimeout(()=>{ if(!S.me&&(S.authId||!S.booted)){S.slow=true;authMode=null;render()} },Number(CFG.slowMs)||12000);
-  try{ const {data}=await sb.auth.getSession(); if(data&&data.session){S.authId=data.session.user.id; startData()} }
+  try{
+    const {data}=await sb.auth.getSession(), ses=data&&data.session;
+    // Mở link ?quan=<quán B> trên máy đang đăng nhập quán A: link thắng. Thoát quán A (chỉ trên máy này,
+    // máy khác không bị ảnh hưởng) rồi hiện màn hình đăng nhập quán B, thay vì vào thẳng quán A.
+    const linkShop=shopCodeFromUrl(), sesShop=ses?shopOfEmail(ses.user&&ses.user.email):'';
+    if(ses&&linkShop&&sesShop&&linkShop!==sesShop){
+      try{await sb.auth.signOut({scope:'local'})}catch(_){}
+      S.loginMsg='Link này của quán “'+linkShop+'”, đã thoát quán “'+sesShop+'” trên máy này. Bạn đăng nhập để vào quán “'+linkShop+'”.';
+    }
+    else if(ses){S.authId=ses.user.id; startData()}
+  }
   catch(e){console.error(e)}
   S.booted=true; if(!S.authId) render();
   sb.auth.onAuthStateChange(ev=>{ if(ev==='SIGNED_OUT'&&S.authId) leave('Phiên đăng nhập đã hết, đăng nhập lại nhé.') });
