@@ -2,6 +2,15 @@
 
 Số phiên bản hiện ở cuối **Cài đặt** trong app. Mới nhất ở trên.
 
+📢 Đông Khách cập nhật phiên bản 2026.10.30.3
+
+✨ Có gì mới:
+• Icon app ngoài màn hình điện thoại là LOGO và TÊN QUÁN của bạn (thay cho icon Đông Khách).
+• Mở link riêng của quán: mã quán tự điền sẵn, chỉ cần nhập tên đăng nhập và mật khẩu.
+• Sửa lỗi app đôi khi đứng ở màn hình "Đang tải…". Nếu tải quá lâu sẽ có nút Tải lại / Đăng nhập lại.
+• Báo cáo: sửa số "TB …/đơn" (trung bình mỗi đơn) hiện chưa đúng.
+• Tăng cường bảo mật dữ liệu của quán.
+
 ## v7 — 2026.10.27 (Đợt 1)
 **Thay đổi**
 - Loại hình kinh doanh (Cài đặt): *Ăn uống* (gọi là "món") hoặc *Bán sản phẩm* (gọi là "sản phẩm"). Quán chưa chọn = Ăn uống.
