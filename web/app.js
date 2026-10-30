@@ -203,18 +203,23 @@ function noteOk(){lockSet({n:0,until:0})}
 
 /* ---------- storage (Supabase) ---------- */
 const CFG=window.LYLY_CONFIG||{};
-// Phiên đăng nhập lưu trên máy (khoá lyly_auth_v1) mà thuộc dự án Supabase KHÁC (vd: app Lyly Food cũ cùng tên miền github.io)
-// thì bỏ đi trước khi mở, để hiện màn hình đăng nhập thay vì treo "Đang tải…".
+// Nơi lưu phiên đăng nhập: khoá RIÊNG theo dự án Supabase (dk_auth_<mã dự án>). Các app khác cùng tên miền ntvinh982.github.io
+// (app Lyly Food cũ dùng khoá chung lyly_auth_v1) không còn đè phiên hay giữ khoá của nhau → hết treo "Đang tải…".
+// Lần đầu: phiên cũ ở khoá chung mà đúng dự án này thì chuyển sang khoá riêng (không phải đăng nhập lại); phiên của dự án khác để nguyên.
+const PROJ=(/^https:\/\/([a-z0-9-]+)\./i.exec(String(CFG.supabaseUrl||''))||[])[1]||'';
+const AUTH_KEY=PROJ?'dk_auth_'+PROJ.toLowerCase():'lyly_auth_v1';
 try{
-  const old=localStorage.getItem('lyly_auth_v1');
-  if(old&&CFG.supabaseUrl){
-    const tok=String((JSON.parse(old)||{}).access_token||'').split('.')[1]||'';
-    const iss=String((JSON.parse(atob(tok.replace(/-/g,'+').replace(/_/g,'/')))||{}).iss||'');
-    if(iss&&iss.indexOf(String(CFG.supabaseUrl).replace(/\/+$/,'')+'/')!==0) localStorage.removeItem('lyly_auth_v1');
+  if(PROJ&&!localStorage.getItem(AUTH_KEY)){
+    const old=localStorage.getItem('lyly_auth_v1');
+    if(old){
+      const tok=String((JSON.parse(old)||{}).access_token||'').split('.')[1]||'';
+      const iss=String((JSON.parse(atob(tok.replace(/-/g,'+').replace(/_/g,'/')))||{}).iss||'');
+      if(iss.indexOf(String(CFG.supabaseUrl).replace(/\/+$/,'')+'/')===0){localStorage.setItem(AUTH_KEY,old);localStorage.removeItem('lyly_auth_v1')}
+    }
   }
 }catch(_){}
 const sb=(window.supabase&&CFG.supabaseUrl&&CFG.supabaseAnonKey&&!/YOUR[-_]/i.test(CFG.supabaseUrl+CFG.supabaseAnonKey))
-  ?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:'lyly_auth_v1'}}):null;
+  ?window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:AUTH_KEY}}):null;
 // Email đăng nhập "giả" = <tên đăng nhập>@<mã quán>.<đuôi>; phải trùng LOGIN_EMAIL_SUFFIX của Edge Function.
 const EMAIL_SUFFIX=CFG.emailSuffix||'app';
 const emailOf=(u,code)=>u+'@'+String(code||'').toLowerCase()+'.'+EMAIL_SUFFIX;
@@ -228,7 +233,7 @@ function shopCodeFromUrl(){try{const v=(new URLSearchParams(location.search).get
 const AI_ON=CFG.enableAI!==false;
 const aiOn=()=>AI_ON&&!!(shopRow()&&shopRow().aiEnabled===true);
 // Số phiên bản hiện ở cuối Cài đặt: để biết quán/máy nào đang chạy bản nào. Đổi mỗi lần đưa bản mới lên cho khách (dạng năm.tháng.ngày).
-const APP_VERSION='2026.10.29';
+const APP_VERSION='2026.10.30.1';
 const shopCodeDefault=()=>shopCodeFromUrl()||shopCodeGet()||CFG.defaultShop||'';
 S.db=!!sb;
 const TBL={staff:'profiles',menu:'menu_items',groups:'menu_groups',customers:'customers',orders:'orders',settings:'settings',shops:'shops',costs:'menu_costs'};
@@ -417,9 +422,11 @@ function render(){
   if(!S.me){
     const mode=!sb?'noconfig':(S.authId||!S.booted)?'wait':(S.signup?'signup':'login');
     S._themeFor=null;
-    if(authMode!==mode){authMode=mode;app.innerHTML=viewAuth(mode);const f=app.querySelector('input');if(f)setTimeout(()=>f.focus(),30)}
+    // đã có mã quán (link ?quan=… hoặc máy nhớ) → con trỏ ở ô Tên đăng nhập
+    if(authMode!==mode){authMode=mode;app.innerHTML=viewAuth(mode);const f=(mode==='login'&&shopCodeDefault()&&app.querySelector('#l_user'))||app.querySelector('input');if(f)setTimeout(()=>f.focus(),30)}
     return;
   }
+  urlShop();
   // vừa đăng nhập: áp giao diện đã lưu trong tài khoản (nếu có)
   if(S._themeFor!==S.me.id){S._themeFor=S.me.id; if(S.me.theme&&S.me.theme!==themeGet()) themeApply(S.me.theme)}
   const keepScroll=authMode===null;
@@ -452,7 +459,8 @@ function render(){
 
 function viewAuth(mode){
   const code=shopCodeDefault(), name=CFG.brandName||'Đông Khách';
-  if(mode==='wait') return `<div class="auth">${logoOf(code,true)}<p>Đang tải…</p></div>`;
+  if(mode==='wait') return `<div class="auth">${logoOf(code,true)}<p>Đang tải…</p>${S.slow?`<p class="hint">Tải lâu hơn bình thường. Kiểm tra mạng rồi bấm Tải lại; vẫn không được thì bấm Đăng nhập lại.</p>
+      <p><button class="btn" type="button" data-act="boot-reload">Tải lại</button> <button class="btn" type="button" data-act="boot-reset">Đăng nhập lại</button></p>`:''}</div>`;
   if(mode==='noconfig') return `<div class="auth">${logoOf(code,true)}<h1>Chưa cấu hình</h1><p>Chưa nối được với Supabase. Mở file <b>config.js</b> và điền địa chỉ dự án + khoá công khai (xem README).</p></div>`;
   if(mode==='signup') return `<div class="auth">${logoOf(code,true)}<h1>Tạo quán mới</h1>
     <form id="signupForm">
@@ -960,7 +968,7 @@ function cmPostMenu(){
 }
 function cmtOpen(){
   const pv=cmPostGet(), ok=new Set(S.menu.filter(m=>m.active!==false).map(m=>m.id));
-  CM={step:'in',text:'',imgs:[],date:tomorrowStr(),busy:false,err:'',drafts:[],ignored:[],prog:null,resume:false,
+  CM={step:'in',text:'',imgs:[],date:defaultOrderDate(),busy:false,err:'',drafts:[],ignored:[],prog:null,resume:false,
     post:pv.today?(pv.today.ids||[]).filter(id=>ok.has(id)):[],pnote:pv.today?String(pv.today.note||''):'',pq:'',pall:false,recent:pv.recent.filter(id=>ok.has(id))};
   renderCmt();
 }
@@ -997,19 +1005,21 @@ function renderCmt(){
         <p class="hint">Chọn ${W.m} của bài đăng. Comment chỉ ghi "1p", "2 phần", "1 M"… thì AI hiểu là ${W.m} này. Không chọn thì AI đoán theo chữ trong comment.</p>
         ${cmPostMenu().length>CM_FEW?`<input type="search" id="cm_pq" class="cm-pq" placeholder="Gõ tên ${W.m} để tìm, vd: hai san" value="${esc(CM.pq)}" autocomplete="off" ${CM.busy?'disabled':''}>`:''}
         <div id="cm_post">${cmPostChips()}</div>
-        <div class="field"><label for="cm_pnote">Ghi thêm cho AI (không bắt buộc)</label><input type="text" id="cm_pnote" maxlength="500" value="${esc(CM.pnote)}" placeholder="VD: không ghi size thì là size M" ${CM.busy?'disabled':''}></div>
+        <div class="field"><label for="cm_pnote">Ghi chú (không bắt buộc)</label><input type="text" id="cm_pnote" maxlength="500" value="${esc(CM.pnote)}" placeholder="VD: không ghi size thì là size M" ${CM.busy?'disabled':''}></div>
       </section>
-      <section class="fs"><h4>Comment</h4>
-        <textarea id="cm_text" class="cm-text" placeholder="Dán comment vào đây.&#10;VD: Chị Như : 2p ( Sóc Trăng )&#10;Chị Yến : mai 6h ship 1p, ko tiêu" ${CM.busy?'disabled':''}>${esc(CM.text)}</textarea>
+      <section class="fs"><h4>Nội dung đơn hàng cần nhập</h4>
+        <textarea id="cm_text" class="cm-text" placeholder="Dán comment hoặc tin nhắn đặt hàng vào đây.&#10;VD: Chị Như : 2p ( Sóc Trăng )&#10;Chị Yến : mai 6h ship 1p, ko tiêu" ${CM.busy?'disabled':''}>${esc(CM.text)}</textarea>
+        <p class="cm-or">Hoặc thêm bằng ảnh chụp màn hình</p>
         <div class="cm-imgs">${CM.imgs.map((im,i)=>`<div class="cm-th"><img src="${im.url}" alt="Ảnh ${i+1}"><button type="button" data-act="cmt-rmimg" data-i="${i}" aria-label="Bỏ ảnh">×</button></div>`).join('')}
           ${CM.imgs.length<CM_MAX_IMG?`<label class="cm-add" for="cm_file">+ Thêm ảnh chụp<input type="file" id="cm_file" class="vh" accept="image/*" multiple></label>`:''}</div>
-        <span class="hint">Chụp màn hình comment rồi thêm ảnh (máy tính: Ctrl+V để dán). Tối đa ${CM_MAX_IMG} ảnh mỗi lần; chụp cuộn chồng lên nhau cũng được, đơn bị trùng sẽ tự bỏ tick.</span>
+        <span class="hint">Tối đa ${CM_MAX_IMG} ảnh mỗi lần (máy tính: Ctrl+V để dán ảnh). Chụp cuộn chồng lên nhau cũng được, đơn bị trùng sẽ tự bỏ tick.</span>
       </section>
       <section class="fs"><h4>Ngày giao</h4>
-        <div class="field"><label for="cm_date">Dùng ngày này cho đơn không ghi ngày</label><input type="date" id="cm_date" value="${esc(CM.date)}"></div>
+        <div class="field"><label for="cm_date">Ngày giao cho đơn không ghi ngày</label><input type="date" id="cm_date" value="${esc(CM.date)}">
+          <span class="hint">Theo Cài đặt: nhập trước ${esc(shop().cutoff||'17:00')} giao hôm nay, từ ${esc(shop().cutoff||'17:00')} giao ngày mai. Đổi được ở đây hoặc từng đơn.</span></div>
       </section>
       ${CM.err?`<div class="banner warn" role="alert">${esc(CM.err)}</div>`:''}
-      <p class="hint">AI chỉ tạo <b>đơn nháp</b>. Anh/chị xem lại và sửa từng đơn trước khi bấm tạo — chưa có đơn nào được lưu ở bước này.</p>
+      <p class="hint">Đây là <b>đơn nháp</b>, chưa được lưu. Bạn vui lòng kiểm tra đơn hàng trước khi lưu.</p>
     </div>
     <div class="sh-foot"><span></span><button class="btn primary" data-act="cmt-read" ${CM.busy?'disabled':''}>${CM.busy?(CM.prog?`Đang đọc… đợt ${CM.prog.k}/${CM.prog.n}`:'Đang đọc comment…'):'Đọc comment'}</button></div>`);
     return;
@@ -1764,9 +1774,9 @@ const LOGO_RE=/^data:image\/(?:webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/, LOGO_MAX
 const BKEY='lyly_brand_v1'; let BR=null, BR_PREVIEW=null, brandSaved='';
 function brandCacheGet(){try{return JSON.parse(localStorage.getItem(BKEY)||'{}')||{}}catch(_){return {}}}
 // Máy nhớ logo + màu của quán để màn hình đăng nhập (và lúc mới mở app) đã đúng thương hiệu quán
-function brandCacheSet(code,b){
-  const key=code+'|'+b.accent+'|'+b.logo.length+'|'+b.logo.slice(-24); if(!code||key===brandSaved) return; brandSaved=key;
-  try{const m=brandCacheGet(); m[code]={accent:b.accent,logo:b.logo}; localStorage.setItem(BKEY,JSON.stringify(m))}catch(_){}
+function brandCacheSet(code,b,name){
+  const key=code+'|'+b.accent+'|'+b.logo.length+'|'+b.logo.slice(-24)+'|'+(name||''); if(!code||key===brandSaved) return; brandSaved=key;
+  try{const m=brandCacheGet(), old=m[code]||{}; m[code]={accent:b.accent,logo:b.logo,name:String(name||old.name||'').slice(0,100)}; localStorage.setItem(BKEY,JSON.stringify(m))}catch(_){}
 }
 function brandNow(){
   let b=BR_PREVIEW;
@@ -1783,7 +1793,66 @@ function applyBrand(){
   else if(r.getAttribute('data-accent')!==b.accent) r.setAttribute('data-accent',b.accent);
   const m=document.querySelector('meta[name="theme-color"]'), c=(ACCENTS.find(x=>x[0]===b.accent)||ACCENTS[0])[2];
   if(m&&m.getAttribute('content')!==c) m.setAttribute('content',c);
-  if(S.me&&S.loaded.settings&&!BR_PREVIEW) brandCacheSet(shopSlug(),b);
+  if(S.me&&S.loaded.settings&&!BR_PREVIEW) brandCacheSet(shopSlug(),b,brandName());
+  homeIcons(b);
+}
+// Icon ngoài màn hình chính + icon tab trình duyệt = logo của quán.
+// iPhone: Safari → Chia sẻ → Thêm vào MH chính (Safari lấy icon apple-touch-icon có trong trang lúc bấm).
+// Android: Chrome → Thêm vào màn hình chính / Cài đặt ứng dụng (đọc manifest).
+// Trang trên GitHub Pages là trang tĩnh, nên app tự vẽ icon PNG vuông từ logo ngay trên máy và tạo manifest riêng của quán:
+// tên quán, logo, mở thẳng link ?quan=<mã quán>. Chưa biết quán nào thì giữ icon Đông Khách.
+// Icon được chụp lúc bấm thêm: quán đổi logo sau đó thì xoá icon cũ trên điện thoại rồi thêm lại.
+const HEAD0={}; let homeKey=null, homeJob=0;
+const headEl=s=>document.head&&document.head.querySelector(s);
+function headSet(s,attr,v){const e=headEl(s); if(e&&v!=null&&e.getAttribute(attr)!==v) e.setAttribute(attr,v)}
+function homeIcons(b){
+  if(BR_PREVIEW) return;                                     // đang xem thử logo trong Cài đặt: chưa đổi icon
+  if(!HEAD0.ok){HEAD0.ok=1; const g=(s,a)=>{const e=headEl(s);return e?e.getAttribute(a):null};
+    HEAD0.icon=g('link[rel="icon"]','href'); HEAD0.apple=g('link[rel="apple-touch-icon"]','href'); HEAD0.manifest=g('link[rel="manifest"]','href'); HEAD0.title=g('meta[name="apple-mobile-web-app-title"]','content')}
+  const code=S.me?shopSlug():shopCodeDefault();
+  const name=String((S.me?brandName():(brandCacheGet()[code]||{}).name)||'').trim().slice(0,60);
+  const key=code&&(b.logo||name)?[code,name,b.accent,b.logo.length,b.logo.slice(-24)].join('|'):'';
+  if(key===homeKey) return; homeKey=key; const job=++homeJob;
+  if(!key){ headSet('link[rel="icon"]','href',HEAD0.icon); headSet('link[rel="apple-touch-icon"]','href',HEAD0.apple);
+    headSet('link[rel="manifest"]','href',HEAD0.manifest); headSet('meta[name="apple-mobile-web-app-title"]','content',HEAD0.title); return }
+  const base=location.origin+location.pathname.replace(/[^/]*$/,''), start=base+'?quan='+encodeURIComponent(code);
+  const nm=name||HEAD0.title||'Đông Khách', color=(ACCENTS.find(x=>x[0]===b.accent)||ACCENTS[0])[2];
+  const done=ic=>{
+    if(job!==homeJob) return;
+    // logo lưu tối đa 192px nên icon 192 là đủ nét (vẽ thêm bản 512 chỉ phóng to, nặng gấp 6 lần)
+    const icons=ic?[{src:ic[192],sizes:'192x192',type:'image/png'}]
+      :[{src:base+'assets/icon-192.png',sizes:'192x192',type:'image/png'},{src:base+'assets/icon-512.png',sizes:'512x512',type:'image/png'}];
+    const m={name:nm,short_name:nm,lang:'vi',id:start,start_url:start,scope:base,display:'standalone',background_color:'#ffffff',theme_color:color,icons};
+    headSet('link[rel="manifest"]','href','data:application/manifest+json,'+encodeURIComponent(JSON.stringify(m)));
+    headSet('meta[name="apple-mobile-web-app-title"]','content',nm);
+    headSet('link[rel="icon"]','href',ic?ic[192]:HEAD0.icon); headSet('link[rel="apple-touch-icon"]','href',ic?ic[180]:HEAD0.apple);
+  };
+  if(!b.logo) return done(null);
+  let im; try{im=new Image()}catch(_){return done(null)}
+  im.onload=()=>{ let ic=null; try{const full=logoFull(im), i={}; for(const n of [180,192]){i[n]=iconPng(im,n,full); if(!i[n]) throw 0} ic=i}catch(_){ic=null} done(ic) };
+  im.onerror=()=>done(null);
+  im.src=b.logo;
+}
+const imgWH=im=>[im.naturalWidth||im.width||0,im.naturalHeight||im.height||0];
+// Logo gần vuông và kín nền (4 góc không trong suốt): tràn hết icon. Còn lại: đặt giữa nền trắng, chừa lề
+// (iPhone tô đen chỗ trong suốt, Android cắt góc).
+function logoFull(im){
+  const [w,h]=imgWH(im); if(!w||!h||Math.abs(w/h-1)>.08) return false;
+  try{const c=document.createElement('canvas'); c.width=c.height=8; const x=c.getContext('2d'); x.drawImage(im,0,0,8,8);
+    const d=x.getImageData(0,0,8,8).data; return [0,7,56,63].every(i=>d[i*4+3]>=250)}catch(_){return false}
+}
+function iconPng(im,n,full){
+  const [w,h]=imgWH(im); if(!w||!h) return '';
+  const c=document.createElement('canvas'); c.width=c.height=n; const x=c.getContext&&c.getContext('2d'); if(!x) return '';
+  x.fillStyle='#fff'; x.fillRect(0,0,n,n); x.imageSmoothingEnabled=true; x.imageSmoothingQuality='high';
+  const k=full?Math.max(n/w,n/h):.8*Math.min(n/w,n/h);
+  x.drawImage(im,(n-w*k)/2,(n-h*k)/2,w*k,h*k);
+  const u=c.toDataURL('image/png'); return /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(u)?u:'';
+}
+// Đăng nhập xong: địa chỉ trang có ?quan=<mã quán> (iPhone "Thêm vào MH chính" mở lại đúng địa chỉ này, đánh dấu trang cũng vậy)
+function urlShop(){
+  const c=shopSlug(); if(!c||shopCodeFromUrl()===c) return;
+  try{const u=new URL(location.href); u.searchParams.set('quan',c); history.replaceState(history.state,'',u.href)}catch(_){}
 }
 // Thu nhỏ ảnh logo trên máy trước khi lưu (vài chục KB là đủ, đỡ tốn dung lượng và tốc độ tải)
 function logoPrep(file){
@@ -1899,6 +1968,8 @@ document.addEventListener('click',async e=>{
   if(e.target.id==='datePick'){try{e.target.showPicker()}catch(_){}return}
   const el=e.target.closest('[data-act]'); if(!el)return;
   const a=el.dataset.act, id=el.dataset.id;
+  if(!S.me&&a==='boot-reload'){location.reload();return}
+  if(!S.me&&a==='boot-reset'){try{localStorage.removeItem(AUTH_KEY)}catch(_){} location.reload();return}   // bỏ phiên lưu trên máy (không xoá dữ liệu gì)
   if(!S.me&&(a==='go-signup'||a==='go-login')){S.signup=(a==='go-signup');S.loginMsg='';render();return}   // màn hình đăng nhập ⇄ tạo quán mới
   if(!actAllowed(a,el)){ if(S.me&&a in ACT_PERM) toast(ACT_PERM[a]==='admin'?'Chỉ quản lý được làm việc này.':NOPERM); return }
   switch(a){
@@ -2057,6 +2128,8 @@ try{new MutationObserver(()=>{const m=themeGet(),cur=document.documentElement.ge
 render();
 (async()=>{
   if(!sb){S.booted=true;render();return}
+  // Quá 12 giây vẫn "Đang tải…" (mạng yếu, phiên lưu trên máy bị kẹt): hiện nút Tải lại / Đăng nhập lại thay vì chờ mãi
+  setTimeout(()=>{ if(!S.me&&(S.authId||!S.booted)){S.slow=true;authMode=null;render()} },Number(CFG.slowMs)||12000);
   try{ const {data}=await sb.auth.getSession(); if(data&&data.session){S.authId=data.session.user.id; startData()} }
   catch(e){console.error(e)}
   S.booted=true; if(!S.authId) render();
